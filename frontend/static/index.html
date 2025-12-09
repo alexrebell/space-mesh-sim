@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Space Mesh Simulator — Орбиты и КА</title>
+
+  <!-- Локальный CSS Cesium -->
+  <link
+    rel="stylesheet"
+    href="/static/Cesium/Build/Cesium/Widgets/widgets.css"
+  />
+
+  <!-- Твой общий стиль -->
+  <link rel="stylesheet" href="/static/css/styles.css" />
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+
+  <!-- Панель управления -->
+  <div class="overlay-panel">
+    <h1>Орбиты и КА</h1>
+
+    <form id="orbit-form">
+      <label>
+        Имя орбиты:
+        <input id="orbit-name" name="orbit-name" type="text" value="LEO-custom" />
+      </label>
+
+      <label>
+        Высота орбиты, км:
+        <input id="orbit-altitude" name="orbit-altitude" type="number" value="550" />
+      </label>
+
+      <label>
+        Наклонение, °:
+        <input id="orbit-inclination" name="orbit-inclination" type="number" value="55" />
+      </label>
+
+      <label>
+        Количество КА на орбите:
+        <input id="orbit-num-sats" name="orbit-num-sats" type="number" value="8" min="1" />
+      </label>
+
+      <label>
+        Равномерно распределить КА по орбите:
+        <input
+          id="orbit-even-spacing"
+          name="orbit-even-spacing"
+          type="checkbox"
+          checked
+        />
+      </label>
+
+      <label>
+        Фазовый шаг между КА, °:
+        <input
+          id="orbit-phase-step"
+          name="orbit-phase-step"
+          type="number"
+          value="45"
+          min="0"
+          max="360"
+        />
+        <small>(используется, если равномерное распределение отключено)</small>
+      </label>
+
+      <button type="submit">➕ Добавить орбиту</button>
+    </form>
+
+    <div class="hint">
+      <br />
+    </div>
+
+    <!-- СПОЙЛЕР: массовое создание орбит -->
+    <details class="bulk-orbits-panel">
+      <summary>🌐Создать массив орбит</summary>
+      <form id="bulk-orbits-form">
+        <label>
+          Высота орбит, км:
+          <input id="bulk-altitude" name="bulk-altitude" type="number" value="550" />
+        </label>
+
+        <label>
+          Количество КА на каждой орбите:
+          <input id="bulk-num-sats" name="bulk-num-sats" type="number" value="8" min="1" />
+        </label>
+
+        <label>
+          Равномерно распределить КА по орбите:
+          <input
+            id="bulk-even-spacing"
+            name="bulk-even-spacing"
+            type="checkbox"
+            checked
+          />
+        </label>
+
+        <label>
+          Фазовый шаг между КА, °:
+          <input
+            id="bulk-phase-step"
+            name="bulk-phase-step"
+            type="number"
+            value="0"
+            min="0"
+            max="360"
+          />
+          <small>(используется, если равномерное распределение отключено)</small>
+        </label>
+
+        <label>
+          Шаг наклонения, ° (от 0 до 180):
+          <input
+            id="bulk-incl-step"
+            name="bulk-incl-step"
+            type="number"
+            value="10"
+            min="1"
+            max="180"
+          />
+        </label>
+
+        <label>
+          Исключить полярные орбиты (90°):
+          <input
+            id="bulk-skip-polar"
+            name="bulk-skip-polar"
+            type="checkbox"
+            checked
+          />
+        </label>
+
+        <button type="submit">🚀 Создать массив орбит</button>
+      </form>
+    </details>
+
+    <!-- Список орбит -->
+    <div id="orbit-list-container">
+      <h2>Текущие орбиты</h2>
+      <ul id="orbit-list"></ul>
+    </div>
+
+    <div id="link-panel">
+      <h2>Линк между КА</h2>
+      <div id="link-info-body">
+        Выберите два КА, по очереди.
+      </div>
+      <button id="link-reset-btn" type="button">Сбросить выбор</button>
+    </div>
+  </div>
+
+  <!-- Указываем базовый путь к Cesium (Assets, Widgets, ThirdParty) -->
+<!--?  <script>-->
+<!--?    window.CESIUM_BASE_URL = "/static/Cesium/Build/Cesium/";-->
+<!--?  </script>-->
+
+  <!-- Локальный Cesium.js -->
+  <script
+          src="/static/Cesium/Build/Cesium/Cesium.js"
+          data-cesium-base-url="/static/Cesium/Build/Cesium/"
+  ></script>
+
+  <!-- Твоя логика приложения -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

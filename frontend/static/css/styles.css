@@ -1,0 +1,159 @@
+html,
+body,
+#cesiumContainer {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: sans-serif;
+}
+
+.overlay-panel {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  max-width: 260px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+
+  /* добавлено, чтобы панель не перекрывала нижнюю панель Cesium */
+  max-height: calc(120vh - 160px);
+  overflow-y: auto;
+}
+
+.overlay-panel h1 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.overlay-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.overlay-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.overlay-panel input {
+  border-radius: 4px;
+  border: 1px solid #555;
+  padding: 3px 5px;
+  font-size: 11px;
+  background: #111;
+  color: #eee;
+}
+
+.overlay-panel button {
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 0;
+  background: #2d9cdb;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.overlay-panel button:hover {
+  background: #2387bf;
+}
+
+.overlay-panel .hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #ff0000;
+}
+
+.overlay-panel small {
+  font-size: 10px;
+  color: #aaa;
+}
+
+#orbit-list-container {
+  margin-top: 8px;
+  border-top: 1px solid #444;
+  padding-top: 6px;
+}
+
+#orbit-list-container h2 {
+  font-size: 12px;
+  margin: 0 0 4px;
+}
+
+#orbit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+#orbit-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 4px solid transparent; /* тут будем ставить цвет орбиты */
+}
+
+#orbit-list .orbit-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+#orbit-list .orbit-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+#orbit-list button {
+  padding: 3px 4px;
+  font-size: 10px;
+  border-radius: 4px;
+  border: 0;
+  cursor: pointer;
+}
+
+#orbit-list .btn-delete-orbit {
+  background: #d9534f;
+  color: #fff;
+}
+
+#orbit-list .btn-delete-sat {
+  background: #f0ad4e;
+  color: #fff;
+}
+
+.orbit-header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.orbit-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #fff;
+  flex-shrink: 0;
+}
+
+#orbit-list .btn-add-sat {
+  background: #5cb85c;
+  color: #fff;
+}
