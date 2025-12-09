@@ -849,3 +849,24 @@ if (linkResetBtn) {
 viewer.scene.camera.setView({
   destination: Cesium.Cartesian3.fromDegrees(0, 20, 20000000.0)
 });
+
+
+// --- 7. Экспорт базовых объектов в глобальный namespace для radio.js ---
+window.spaceMesh = {
+  viewer,
+  clock,
+  orbitStore,
+  EARTH_RADIUS,
+  start
+};
+
+// --- 8. Кнопка скрыть/показать панель "Орбиты и КА" ---
+const orbitPanel = document.getElementById("orbit-panel");
+const orbitToggle = document.getElementById("orbit-toggle");
+
+if (orbitPanel && orbitToggle) {
+  orbitToggle.addEventListener("click", () => {
+    const hidden = orbitPanel.classList.toggle("hidden");
+    orbitToggle.textContent = hidden ? "▼ Орбиты и КА" : "▲ Орбиты и КА";
+  });
+}

@@ -17,9 +17,12 @@
 <body>
   <div id="cesiumContainer"></div>
 
+<!-- Кнопка скрыть/показать панель орбит -->
+<div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
+
   <!-- Панель управления -->
-  <div class="overlay-panel">
-    <h1>Орбиты и КА</h1>
+  <div id="orbit-panel" class="overlay-panel">
+      <h1>Орбиты и КА</h1>
 
     <form id="orbit-form">
       <label>
@@ -149,6 +152,70 @@
       <button id="link-reset-btn" type="button">Сбросить выбор</button>
     </div>
   </div>
+  <!-- Правая панель: радиосеть КА -->
+  <div id="radio-panel" class="overlay-panel radio-panel">
+
+
+
+      <h2>Радиосеть КА</h2>
+
+      <label>
+          <input type="checkbox" id="radio-enabled"/>
+          Активировать моделирование радиосвязи
+      </label>
+
+      <form id="radio-form">
+          <h3>Базовые параметры канала</h3>
+
+          <label>
+              Частота, МГц:
+              <input id="radio-freq-mhz" type="number" value="2200" min="10"/>
+          </label>
+
+          <label>
+              Мощность передатчика, dBm:
+              <input id="radio-tx-power" type="number" value="30"/>
+          </label>
+
+          <label>
+              Коэффициент усиления антенны Tx, dBi:
+              <input id="radio-gain-tx" type="number" value="5"/>
+          </label>
+
+          <label>
+              Коэффициент усиления антенны Rx, dBi:
+              <input id="radio-gain-rx" type="number" value="5"/>
+          </label>
+
+          <label>
+              Чувствительность приёмника, dBm:
+              <input id="radio-rx-sens" type="number" value="-100"/>
+          </label>
+
+          <label>
+              Уровень шумов (Noise Floor), dBm:
+              <input id="radio-noise-floor" type="number" value="-110"/>
+          </label>
+
+          <label>
+              Минимальный SNR для линка, dB:
+              <input id="radio-min-snr" type="number" value="5"/>
+          </label>
+
+          <label>
+              Максимальная дальность линка, км (0 = только по радиофизике):
+              <input id="radio-max-range-km" type="number" value="0"/>
+          </label>
+
+          <button type="submit">Применить параметры</button>
+      </form>
+
+      <div id="radio-mesh-info" style="margin-top:8px; font-size:11px;">
+          Радиомоделирование выключено.
+      </div>
+  </div>
+
+<div id="radio-toggle" class="radio-toggle-btn">▲ Радио</div>
 
   <!-- Указываем базовый путь к Cesium (Assets, Widgets, ThirdParty) -->
 <!--?  <script>-->
@@ -163,5 +230,7 @@
 
   <!-- Твоя логика приложения -->
   <script src="/static/js/app.js"></script>
+  <script src="/static/js/radio.js"></script>
+
 </body>
 </html>
