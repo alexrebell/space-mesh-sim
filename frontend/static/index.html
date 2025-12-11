@@ -10,7 +10,7 @@
     href="/static/Cesium/Build/Cesium/Widgets/widgets.css"
   />
 
-  <!-- Твой общий стиль -->
+  <!-- Общий стиль -->
   <link rel="stylesheet" href="/static/css/styles.css" />
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
 </head>
@@ -154,14 +154,18 @@
   </div>
   <!-- Правая панель: радиосеть КА -->
   <div id="radio-panel" class="overlay-panel radio-panel">
-
-
-
       <h2>Радиосеть КА</h2>
 
+      <!-- Включение / выключение моделирования -->
       <label>
           <input type="checkbox" id="radio-enabled"/>
           Активировать моделирование радиосвязи
+      </label>
+
+      <!-- Управление отрисовкой линий -->
+      <label>
+          <input type="checkbox" id="radio-draw-links" checked />
+          Отрисовывать линии линков
       </label>
 
       <form id="radio-form">
@@ -179,12 +183,12 @@
 
           <label>
               Коэффициент усиления антенны Tx, dBi:
-              <input id="radio-gain-tx" type="number" value="5"/>
+              <input id="radio-gain-tx" type="number" value="10"/>
           </label>
 
           <label>
               Коэффициент усиления антенны Rx, dBi:
-              <input id="radio-gain-rx" type="number" value="5"/>
+              <input id="radio-gain-rx" type="number" value="10"/>
           </label>
 
           <label>
@@ -207,15 +211,208 @@
               <input id="radio-max-range-km" type="number" value="0"/>
           </label>
 
+          <h3>Модуляция и кодирование (MCS)</h3>
+
+          <label>
+              Схема модуляции:
+              <select id="radio-modulation">
+                  <option value="BPSK">BPSK</option>
+                  <option value="QPSK" selected>QPSK</option>
+                  <option value="8PSK">8PSK</option>
+                  <option value="16QAM">16-QAM</option>
+                  <option value="64QAM">64-QAM</option>
+              </select>
+          </label>
+
+          <label>
+              Кодовая скорость (FEC):
+              <select id="radio-coding-rate">
+                  <option value="0.5">1/2</option>
+                  <option value="0.6667" selected>2/3</option>
+                  <option value="0.75">3/4</option>
+              </select>
+          </label>
+
+          <label>
+              Целевая скорость передачи, Мбит/с:
+              <input id="radio-data-rate-mbps" type="number" value="50" min="0.1" step="0.1"/>
+          </label>
+
+          <label>
+              Полоса сигнала, МГц:
+              <input id="radio-bandwidth-mhz" type="number" value="20" min="0.1" step="0.1"/>
+          </label>
+
+          <h3>Антенны и потери тракта</h3>
+
+          <label>
+              Тип антенны:
+              <select id="radio-antenna-type">
+                  <option value="directional">Направленная (узкий луч)</option>
+                  <option value="sector">Секторная (широкий луч)</option>
+                  <option value="phased">ФАР (электронное сканирование)</option>
+                  <option value="omni">Всенаправленная (Omni, круговое покрытие)</option>
+                  <option value="custom">Пользовательская / кастомная</option>
+              </select>
+          </label>
+
+          <!-- ПАРАМЕТРЫ ДЛЯ НАПРАВЛЕННОЙ / СЕКТОРНОЙ / ФАР -->
+          <div id="antenna-common-block">
+
+              <label>
+                  Ширина основного лепестка, °:
+                  <input id="radio-beam-width" type="number" value="20" min="1" max="180"/>
+              </label>
+
+              <label>
+                  Потери наведения (pointing loss), dB:
+                  <input id="radio-pointing-loss" type="number" value="1.0" step="0.1"/>
+              </label>
+
+              <label>
+                  Потери поляризации, dB:
+                  <input id="radio-pol-loss" type="number" value="0.5" step="0.1"/>
+              </label>
+
+          </div>
+
+          <!-- ПАРАМЕТРЫ ТОЛЬКО ДЛЯ ФАР -->
+          <div id="antenna-phased-block" style="display:none;">
+
+              <label>
+                  Максимальный угол электронного сканирования, °:
+                  <input id="radio-phased-max-scan" type="number" value="45" min="1" max="90"/>
+              </label>
+
+              <label>
+                  Дополнительные потери при большом угле сканирования, dB:
+                  <input id="radio-phased-scan-loss" type="number" value="1.5" step="0.1"/>
+              </label>
+
+          </div>
+
+          <!-- ПАРАМЕТРЫ ТОЛЬКО ДЛЯ ОМНИ -->
+          <div id="antenna-omni-block" style="display:none;">
+
+              <label>
+                  Эффективное усиление Omni, dBi:
+                  <input id="radio-omni-gain" type="number" value="2" step="0.1"/>
+              </label>
+
+          </div>
+
+          <!-- ПАРАМЕТРЫ ДЛЯ КАСТОМНОЙ (ПОЛЬЗОВАТЕЛЬСКОЙ) ДИАГРАММЫ -->
+          <div id="antenna-custom-block" style="display:none;">
+
+              <label>
+                  Максимальный Gain, dBi:
+                  <input id="radio-custom-gain" type="number" value="12" step="0.1"/>
+              </label>
+
+              <label>
+                  Ширина основного лепестка, °:
+                  <input id="radio-custom-beamwidth" type="number" value="25" min="1" max="180"/>
+              </label>
+
+              <label>
+                  Ослабление вне главного луча (sidelobe), dB:
+                  <input id="radio-custom-sidelobe" type="number" value="10" min="0" step="0.1"/>
+              </label>
+
+              <label>
+                  Модель ослабления L(θ), dB/°:
+                  <input id="radio-custom-angle-loss" type="number" value="0.4" min="0" step="0.1"/>
+              </label>
+
+          </div>
+
+          <!-- ОБЩИЕ ПОТЕРИ ТРАКТА (всегда показываются) -->
+          <h4>Потери тракта</h4>
+
+          <label>
+              Потери фидера Tx, dB:
+              <input id="radio-tx-feeder-loss" type="number" value="1.0" step="0.1"/>
+          </label>
+
+          <label>
+              Потери фидера Rx, dB:
+              <input id="radio-rx-feeder-loss" type="number" value="1.0" step="0.1"/>
+          </label>
+
+          <label>
+              Реализуемые потери (implementation loss), dB:
+              <input id="radio-impl-loss" type="number" value="1.0" step="0.1"/>
+          </label>
+
+
+          <h3>Шум и приёмник</h3>
+
+          <label>
+              Эквивалентная шумовая температура системы, K:
+              <input id="radio-sys-temp-k" type="number" value="500" min="1" step="1"/>
+          </label>
+
+          <label>
+              Ширина шумовой полосы приёмника, МГц:
+              <input id="radio-noise-bandwidth-mhz" type="number" value="20" min="0.1" step="0.1"/>
+          </label>
+
+          <h3>Mesh-параметры</h3>
+
+          <label>
+              Максимум соседей на КА (0 = без ограничения):
+              <input id="radio-mesh-max-neighbors" type="number" value="0" min="0"/>
+          </label>
+
+          <label>
+              Метрика выбора линков:
+              <select id="radio-mesh-metric">
+                  <option value="snr" selected>SNR</option>
+                  <option value="distance">Минимальная дистанция</option>
+                  <option value="snr_distance">SNR / дистанция</option>
+              </select>
+          </label>
+
+          <h3>Энергетика КА</h3>
+
+          <label>
+              Электрическая мощность передатчика, W:
+              <input id="radio-tx-elec-power" type="number" value="60" min="0" step="1"/>
+          </label>
+
+          <label>
+              Доля времени в передаче (duty cycle), %:
+              <input id="radio-duty-cycle" type="number" value="20" min="0" max="100" step="1"/>
+          </label>
+
+          <label>
+              Эталонная дальность линка для расчёта, км:
+              <input id="radio-ref-distance-km" type="number" value="1000" min="1" step="1"/>
+          </label>
+
           <button type="submit">Применить параметры</button>
       </form>
 
+      <!-- Блок: радиосеть (по всей сети) -->
       <div id="radio-mesh-info" style="margin-top:8px; font-size:11px;">
           Радиомоделирование выключено.
       </div>
+
+      <!-- Блок: расчётные показатели эталонного линка -->
+      <div id="radio-link-summary" style="margin-top:8px; font-size:11px;">
+          <b>Расчётные показатели канала (эталонный линк):</b><br/>
+          Нет данных — задайте параметры канала и орбит.
+      </div>
+
+      <!-- Блок: энергетика КА -->
+      <div id="radio-energy-summary" style="margin-top:8px; font-size:11px;">
+          <b>Энергетика КА:</b><br/>
+          Нет данных — задайте мощность передатчика и duty cycle.
+      </div>
   </div>
 
-<div id="radio-toggle" class="radio-toggle-btn">▲ Радио</div>
+  <div id="radio-toggle" class="radio-toggle-btn">▲ Радио</div>
+
 
   <!-- Указываем базовый путь к Cesium (Assets, Widgets, ThirdParty) -->
 <!--?  <script>-->

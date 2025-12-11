@@ -177,14 +177,16 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 
 .radio-panel {
   position: absolute;
-  bottom: 60px;   /* <-- Привязываем снизу */
-  right: 10px;    /* <-- Привязываем справа */
+  bottom: 60px;   /* Привязываем снизу */
+  right: 10px;    /* Привязываем справа */
 
-  left: auto;     /* <-- отменяем наследование из overlay-panel */
-  top: auto;      /* <-- отменяем верхнее позиционирование */
+  left: auto;
+  top: auto;
+  width: 400px;
+  max-width: 400px;
 
-  max-width: 300px;
-  max-height: 150vh;
+  /* ВАЖНО: ограничиваем высоту в пределах окна */
+  max-height: calc(100vh - 120px);
   min-height: 100px;
   overflow-y: auto;
 
@@ -193,6 +195,7 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   opacity: 1;
   z-index: 1000;
 }
+
 
 /* Скрытое состояние — уезжает вниз */
 .radio-panel.hidden {
