@@ -167,6 +167,19 @@
         <input type="checkbox" id="radio-draw-links" checked />
         Отрисовывать линии линков
       </label>
+
+      <label title="Если включено — слишком близкие КА не будут соединяться линками (уменьшает лаги при скучивании).">
+        <input type="checkbox" id="radio-limit-min-distance" />
+        Ограничить линк снизу (не строить, если ближе)
+      </label>
+
+      <div id="radio-min-distance-row" class="radio-inline-row" style="display:none;">
+        <label title="Минимальная дистанция между КА (км). Если расстояние меньше — линк пропускается (не рисуем и не считаем).">
+          Мин. дистанция, км:
+          <input id="radio-min-link-distance-km" type="number" value="400" min="0" step="1" />
+        </label>
+      </div>
+
     </div>
 
     <!-- Скролл-область: тип антенны + все входные параметры -->
