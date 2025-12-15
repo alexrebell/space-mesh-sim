@@ -37,6 +37,10 @@ body,
   gap: 6px;
 }
 
+#orbits-panel {
+  max-height: 85vh;
+  overflow-y: auto;
+}
 .overlay-panel label {
   display: flex;
   flex-direction: column;
@@ -188,13 +192,14 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   /* ВАЖНО: ограничиваем высоту в пределах окна */
   max-height: calc(100vh - 120px);
   min-height: 100px;
-  overflow-y: auto;
 
   transition: transform 0.25s ease-out, opacity 0.25s;
   transform: translateY(0);
   opacity: 1;
   z-index: 1000;
-}
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;}
 
 
 /* Скрытое состояние — уезжает вниз */
@@ -260,4 +265,28 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 /* Сдвигаем левую панель чуть ниже, чтобы не пересекалась с кнопкой */
 #orbit-panel {
   top: 45px; /* вместо 10px, которые заданы в .overlay-panel */
+  max-height: 75vh;
+  width: 400px;
+  overflow-y: auto;
+}
+
+/* ------------------------------
+   Radio panel layout (scroll top, fixed bottom)
+   ------------------------------ */
+
+.radio-panel-top {
+  flex: 0 0 auto;
+}
+
+.radio-panel-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-right: 6px; /* keep scrollbar off the content */
+}
+
+.radio-panel-footer {
+  flex: 0 0 auto;
+  border-top: 1px solid #333;
+  padding-top: 8px;
+  background: rgba(0, 0, 0, 0.75);
 }

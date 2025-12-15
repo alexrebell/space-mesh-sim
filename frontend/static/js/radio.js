@@ -49,37 +49,37 @@
     lastAvgLinkDistKm: 0,
 
     config: {
-      // Базовый линк-бюджет
+      // Линк-бюджет
       freqMHz: 2200,
       txPowerDbm: 30,
       gainTxDb: 10,
       gainRxDb: 10,
       rxSensDbm: -100,
-      noiseFloorDbm: -110, // используется как fallback, если не считаем из T_sys
+      noiseFloorDbm: -110, // fallback, если не считаем из T_sys
       minSnrDb: 5,
       maxRangeKm: 0, // 0 = без ограничения по дальности
 
-      // 1.1. Модуляция и кодирование (MCS)
+      // MCS
       modulation: "QPSK",
       codingRate: 2 / 3,
       dataRateMbps: 50,
       bandwidthMHz: 20,
 
-      // 1.2. Антенны / направленность и потери
+      // Антенны / потери
       antennaType: "directional", // directional|sector|phased|omni|custom
 
-      beamWidthDeg: 20,       // для направленной/секторной/ФАР (основной лепесток)
-      pointingLossDb: 1.0,    // потери наведения
-      polLossDb: 0.5,         // потери поляризации
+      beamWidthDeg: 20,
+      pointingLossDb: 1.0,
+      polLossDb: 0.5,
 
-      // Параметры ФАР
+      // ФАР
       phasedMaxScanDeg: 45,
       phasedScanLossDb: 1.5,
 
-      // Параметры всенаправленной антенны
+      // Omni
       omniGainDb: 2.0,
 
-      // Параметры кастомной диаграммы
+      // Custom
       customGainDb: 12.0,
       customBeamwidthDeg: 25,
       customSidelobeLossDb: 10.0,
@@ -90,18 +90,18 @@
       rxFeederLossDb: 1.0,
       implLossDb: 1.0,
 
-      // 1.4. Параметры шума / приёмника
+      // Шум / приёмник
       sysTempK: 500,
       noiseBandwidthMHz: 20,
 
-      // 1.5. Mesh-специфика
+      // Mesh
       maxNeighborsPerSat: 0,      // 0 = без ограничения
-      routingMetric: "snr",       // пока для будущих расширений
+      routingMetric: "snr",
 
-      // 1.6. Энергетика КА
+      // Энергетика КА
       txElecPowerW: 60,
-      dutyCycle: 0.2,             // доля времени (0…1)
-      refDistanceKm: 1000         // эталонная дальность для single-link summary
+      dutyCycle: 0.2,             // 0…1
+      refDistanceKm: 1000
     },
 
     // key "satIdA|satIdB" -> Cesium.Entity полилинии
@@ -110,7 +110,6 @@
 
   // --- 3. Вспомогательные функции по орбитам и спутникам ---
 
-  // Собрать все сущности спутников из orbitStore
   function collectAllSatellites() {
     const sats = [];
 
@@ -120,12 +119,9 @@
       for (const sat of group.satellites) {
         if (!sat) continue;
 
-        // 1) sat — Cesium.Entity
         if (sat.position && sat.position.getValue) {
           sats.push(sat);
-        }
-        // 2) sat.entity — Cesium.Entity
-        else if (sat.entity && sat.entity.position && sat.entity.position.getValue) {
+        } else if (sat.entity && sat.entity.position && sat.entity.position.getValue) {
           sats.push(sat.entity);
         }
       }
@@ -134,7 +130,6 @@
     return sats;
   }
 
-  // Средний орбитальный период (для энергетики на виток)
   function computeAverageOrbitPeriodSec() {
     let sum = 0;
     let count = 0;
@@ -147,7 +142,6 @@
     });
 
     if (count === 0) {
-      // Если орбит нет — возьмём типичные 95 мин
       return 95 * 60;
     }
     return sum / count;
@@ -161,7 +155,6 @@
     return 32.44 + 20 * Math.log10(dKm) + 20 * Math.log10(freqMHz);
   }
 
-  // Проверка прямой видимости с учётом земного шара
   function hasLineOfSightRadio(posA, posB) {
     const R = EARTH_RADIUS;
 
@@ -182,19 +175,18 @@
     return distToCenter >= R;
   }
 
-  // Рассчитать эквивалентный Noise Floor из T_sys и B
   function computeNoiseFloorFromTemp(cfg) {
     const T = cfg.sysTempK;
     const B_Hz = cfg.noiseBandwidthMHz * 1e6;
     if (T <= 0 || B_Hz <= 0) return cfg.noiseFloorDbm;
 
-    const k = 1.38064852e-23; // Дж/К
+    const k = 1.38064852e-23;
     const N_watt = k * T * B_Hz;
     const N_dbm = 10 * Math.log10(N_watt / 1e-3);
     return N_dbm;
   }
 
-  // --- 5. MCS: требуемый Eb/N0 для выбранной модуляции и кодовой скорости ---
+  // --- 5. MCS: требуемый Eb/N0 ---
 
   function getRequiredEbNoDb(modulation, codingRate) {
     const r = codingRate || 0.5;
@@ -225,65 +217,65 @@
       if (r <= 0.66) return 14.0;
       return 16.0;
     }
-    return 5.0; // дефолт
+    return 5.0;
   }
 
-  // --- 6. Учёт типа антенны: эффективные усиления и дополнительные потери ---
+  // --- 6. Антенна: эффективные усиления + флаги применения потерь ---
 
   /**
    * Возвращает:
    *  {
    *    effGainTxDb,
    *    effGainRxDb,
-   *    extraLossDb  // добавляем к implLossDb (например, для ФАР)
+   *    extraLossDb,
+   *    applyPointingLoss: boolean
    *  }
    */
-  function getEffectiveAntennaGains(cfg) {
+  function getAntennaModel(cfg) {
     let effGainTxDb = cfg.gainTxDb;
     let effGainRxDb = cfg.gainRxDb;
     let extraLossDb = 0.0;
+
+    // Важно: "pointingLoss" логично применять только там, где реально требуется наведение.
+    // Omni и (в твоём новом UI) Custom считаем как "профиль без отдельного pointing loss".
+    let applyPointingLoss = true;
 
     const type = cfg.antennaType || "directional";
 
     switch (type) {
       case "omni":
-        // Всенаправленная: используем omniGainDb вместо Gtx/Grx, потери наведения ≈ 0
         effGainTxDb = cfg.omniGainDb;
         effGainRxDb = cfg.omniGainDb;
+        applyPointingLoss = false;
         break;
 
       case "phased":
-        // ФАР: считаем, что можем лучше компенсировать наведение,
-        // но добавляем дополнительные потери на сканирование
-        // (реалистично было бы учитывать угол, но пока используем постоянную оценку).
         extraLossDb += cfg.phasedScanLossDb;
+        applyPointingLoss = true;
         break;
 
       case "custom":
-        // Пользовательская диаграмма: Gtx/Grx берём из customGainDb
         effGainTxDb = cfg.customGainDb;
         effGainRxDb = cfg.customGainDb;
+        applyPointingLoss = false;
         break;
 
       case "sector":
-        // Секторная: могли бы снижать усиление в зависимости от ширины сектора,
-        // но пока оставляем Gtx/Grx как есть (задаётся пользователем).
-        break;
-
       case "directional":
       default:
-        // По умолчанию — как есть.
+        applyPointingLoss = true;
         break;
     }
 
     return {
       effGainTxDb,
       effGainRxDb,
-      extraLossDb
+      extraLossDb,
+      applyPointingLoss
     };
   }
 
-  // --- 7. Оценка линка между двумя КА (для mesh-расчёта) ---
+  // --- 7. Оценка линка между двумя КА ---
 
   function evaluateLink(posA, posB) {
     const cfg = radioState.config;
@@ -291,12 +283,10 @@
     const distanceMeters = Cesium.Cartesian3.distance(posA, posB);
     const distanceKm = distanceMeters / 1000.0;
 
-    // Ограничение по максимальной дальности
     if (cfg.maxRangeKm > 0 && distanceKm > cfg.maxRangeKm) {
       return { linkUp: false, distanceKm };
     }
 
-    // Прямая видимость
     const los = hasLineOfSightRadio(posA, posB);
     if (!los) {
       return { linkUp: false, distanceKm, los: false };
@@ -304,14 +294,14 @@
 
     const fsplDb = computeFsplDb(distanceMeters, cfg.freqMHz);
 
-    // Эффективные усиления с учётом типа антенны
-    const { effGainTxDb, effGainRxDb, extraLossDb } = getEffectiveAntennaGains(cfg);
+    const ant = getAntennaModel(cfg);
+    const pointingLossDb = ant.applyPointingLoss ? cfg.pointingLossDb : 0.0;
 
-    // Итоговые усиления с учётом потерь
     const totalTxGainDb =
-      effGainTxDb - cfg.txFeederLossDb - cfg.pointingLossDb;
+      ant.effGainTxDb - cfg.txFeederLossDb - pointingLossDb;
+
     const totalRxGainDb =
-      effGainRxDb - cfg.rxFeederLossDb - cfg.pointingLossDb - cfg.polLossDb;
+      ant.effGainRxDb - cfg.rxFeederLossDb - pointingLossDb - cfg.polLossDb;
 
     const noiseFloorDbm = computeNoiseFloorFromTemp(cfg);
 
@@ -321,7 +311,7 @@
       totalRxGainDb -
       fsplDb -
       cfg.implLossDb -
-      extraLossDb;
+      ant.extraLossDb;
 
     const snrDb = rxPowerDbm - noiseFloorDbm;
 
@@ -420,7 +410,7 @@
     radioMeshInfoEl.innerHTML = textHtml;
   }
 
-  // --- 9.1. Переключение видимости блоков антенны ---
+  // --- 9.1. Переключение видимости блоков антенны (согласно новой HTML-логике) ---
 
   function updateAntennaBlocksVisibility(type) {
     if (!type && antennaTypeSelect) {
@@ -430,9 +420,13 @@
 
     const t = type || "directional";
 
+    // ВАЖНО:
+    // - common блок: только directional/sector/phased
+    // - omni: только omni блок
+    // - custom: только custom блок
     if (antennaCommonBlock) {
       antennaCommonBlock.style.display =
-        (t === "directional" || t === "sector" || t === "phased" || t === "custom")
+        (t === "directional" || t === "sector" || t === "phased")
           ? "block"
           : "none";
     }
@@ -483,7 +477,6 @@
       cfg.antennaType = antennaTypeSelect.value || cfg.antennaType;
       updateAntennaBlocksVisibility(cfg.antennaType);
     });
-    // начальная инициализация
     updateAntennaBlocksVisibility(antennaTypeSelect.value);
   } else {
     updateAntennaBlocksVisibility(radioState.config.antennaType);
@@ -495,7 +488,7 @@
 
       const cfg = radioState.config;
 
-      // Базовые
+      // Линк-бюджет
       const freqInput         = document.getElementById("radio-freq-mhz");
       const txInput           = document.getElementById("radio-tx-power");
       const gTxInput          = document.getElementById("radio-gain-tx");
@@ -548,7 +541,7 @@
       const dutyCycleInput    = document.getElementById("radio-duty-cycle");
       const refDistInput      = document.getElementById("radio-ref-distance-km");
 
-      // Применяем базовые
+      // Применяем линк-бюджет
       if (freqInput)      cfg.freqMHz        = parseFloat(freqInput.value)      || cfg.freqMHz;
       if (txInput)        cfg.txPowerDbm     = parseFloat(txInput.value)        || cfg.txPowerDbm;
       if (gTxInput)       cfg.gainTxDb       = parseFloat(gTxInput.value)       || cfg.gainTxDb;
@@ -578,6 +571,7 @@
 
       // Антенна
       if (antTypeInput)   cfg.antennaType    = antTypeInput.value || cfg.antennaType;
+
       if (beamWidthInput) {
         const v = parseFloat(beamWidthInput.value);
         cfg.beamWidthDeg = !isNaN(v) && v > 0 ? v : cfg.beamWidthDeg;
@@ -669,19 +663,16 @@
         cfg.refDistanceKm = !isNaN(v) && v > 0 ? v : cfg.refDistanceKm;
       }
 
-      // Обновляем видимость блоков антенны после изменения
       updateAntennaBlocksVisibility(cfg.antennaType);
 
-      // Краткий фидбек
       const noiseFromTemp = computeNoiseFloorFromTemp(cfg).toFixed(1);
       updateRadioMeshInfo(
         `<b>Параметры обновлены.</b><br/>
-         f = ${cfg.freqMHz} МГц, Tx = ${cfg.txPowerDbm} dBm, Gt = ${cfg.gainTxDb} dBi, Gr = ${cfg.gainRxDb} dBi<br/>
+         f = ${cfg.freqMHz} МГц, Tx = ${cfg.txPowerDbm} dBm<br/>
          RxSens = ${cfg.rxSensDbm} dBm, Noise ≈ ${noiseFromTemp} dBm (из T_sys и B), SNRmin = ${cfg.minSnrDb} dB<br/>
          MaxRange = ${cfg.maxRangeKm > 0 ? cfg.maxRangeKm + " км" : "не ограничена (по радиофизике)"}`
       );
 
-      // Форсим перерасчёт сети и обновление summary при ближайшем тике
       radioState.lastUpdateSeconds = 0;
       updateSingleLinkAndEnergySummary();
     });
@@ -694,7 +685,7 @@
     if (B_Hz <= 0 || !isFinite(snrDb)) return NaN;
 
     const snrLin = Math.pow(10, snrDb / 10);
-    const C_bps = B_Hz * Math.log2(1 + snrLin); // формула Шеннона
+    const C_bps = B_Hz * Math.log2(1 + snrLin);
     return C_bps / 1e6;
   }
 
@@ -702,27 +693,23 @@
     const cfg = radioState.config;
     if (!radioLinkSummaryEl && !radioEnergySummaryEl) return;
 
-    // --- Single-link summary ---
-
-    // Референсная дальность: либо cfg.refDistanceKm, либо последняя средняя по сети
     let dRefKm = cfg.refDistanceKm;
     if ((!dRefKm || dRefKm <= 0) && radioState.lastAvgLinkDistKm > 0) {
       dRefKm = radioState.lastAvgLinkDistKm;
     }
-    if (!dRefKm || dRefKm <= 0) {
-      dRefKm = 1000; // дефолт
-    }
+    if (!dRefKm || dRefKm <= 0) dRefKm = 1000;
 
     const dRefMeters = dRefKm * 1000;
     const fsplRefDb = computeFsplDb(dRefMeters, cfg.freqMHz);
 
-    // Эффективные усиления по типу антенны (как в evaluateLink)
-    const { effGainTxDb, effGainRxDb, extraLossDb } = getEffectiveAntennaGains(cfg);
+    const ant = getAntennaModel(cfg);
+    const pointingLossDb = ant.applyPointingLoss ? cfg.pointingLossDb : 0.0;
 
     const totalTxGainDb =
-      effGainTxDb - cfg.txFeederLossDb - cfg.pointingLossDb;
+      ant.effGainTxDb - cfg.txFeederLossDb - pointingLossDb;
+
     const totalRxGainDb =
-      effGainRxDb - cfg.rxFeederLossDb - cfg.pointingLossDb - cfg.polLossDb;
+      ant.effGainRxDb - cfg.rxFeederLossDb - pointingLossDb - cfg.polLossDb;
 
     const noiseFromTemp = computeNoiseFloorFromTemp(cfg);
 
@@ -732,29 +719,25 @@
       totalRxGainDb -
       fsplRefDb -
       cfg.implLossDb -
-      extraLossDb;
+      ant.extraLossDb;
 
     const snrRefDb = rxRefDbm - noiseFromTemp;
 
-    // Eb/N0 для заданного Rb и B
     const Rb = cfg.dataRateMbps * 1e6;
     const B_Hz = cfg.bandwidthMHz * 1e6;
     let ebnoRefDb = NaN;
     if (Rb > 0 && B_Hz > 0 && isFinite(snrRefDb)) {
-      const ratio = Rb / B_Hz; // Rb/B
+      const ratio = Rb / B_Hz;
       ebnoRefDb = snrRefDb - 10 * Math.log10(ratio);
     }
     const ebnoReqDb = getRequiredEbNoDb(cfg.modulation, cfg.codingRate);
     const ebnoMarginDb = isFinite(ebnoRefDb) ? ebnoRefDb - ebnoReqDb : NaN;
 
-    // Оценка C_max по Шеннону
     const capRefMbps = computeCapacityMbps(cfg, snrRefDb);
 
-    // Оценка максимальной дальности по Rx и SNR
     const gainsDb =
-      cfg.txPowerDbm + totalTxGainDb + totalRxGainDb - cfg.implLossDb - extraLossDb;
+      cfg.txPowerDbm + totalTxGainDb + totalRxGainDb - cfg.implLossDb - ant.extraLossDb;
 
-    // 1) по чувствительности
     let rMaxRxKm = NaN;
     if (gainsDb > cfg.rxSensDbm) {
       const fsplLimitRx = gainsDb - cfg.rxSensDbm;
@@ -765,7 +748,6 @@
       rMaxRxKm = dKmRx;
     }
 
-    // 2) по SNR
     let rMaxSnrKm = NaN;
     if (isFinite(noiseFromTemp)) {
       const rxAtSnr = noiseFromTemp + cfg.minSnrDb;
@@ -806,18 +788,17 @@
          итог ≈ <b>${isFinite(rMaxKm) ? rMaxKm.toFixed(0) : "-"}</b> км`;
     }
 
-    // --- Энергетика КА ---
-
     if (radioEnergySummaryEl) {
-      const Ptx = cfg.txElecPowerW; // W
-      const duty = cfg.dutyCycle;   // 0…1
+      const Ptx = cfg.txElecPowerW;
+      const duty = cfg.dutyCycle;
+
       let Ebit_J = NaN;
       if (Ptx > 0 && Rb > 0) {
         Ebit_J = Ptx / Rb;
       }
 
       const Pavg = Ptx * duty;
-      const Torbit = computeAverageOrbitPeriodSec(); // сек
+      const Torbit = computeAverageOrbitPeriodSec();
       const Eorbit_J = Pavg * Torbit;
       const Eorbit_Wh = Eorbit_J / 3600.0;
 
@@ -835,16 +816,12 @@
   // --- 12. Основной цикл: пересчёт mesh-сети ---
 
   clock.onTick.addEventListener(function (clockEvent) {
-    if (!radioState.enabled) {
-      return;
-    }
+    if (!radioState.enabled) return;
 
     const time = clockEvent.currentTime;
     const seconds = Cesium.JulianDate.secondsDifference(time, startTime);
 
-    if (seconds - radioState.lastUpdateSeconds < radioState.updatePeriodSec) {
-      return;
-    }
+    if (seconds - radioState.lastUpdateSeconds < radioState.updatePeriodSec) return;
     radioState.lastUpdateSeconds = seconds;
 
     const sats = collectAllSatellites();
@@ -860,7 +837,6 @@
 
     const cfg = radioState.config;
 
-    // Если линии временно отключены — очищаем существующие, но считаем статистику
     if (!radioState.drawLinks && radioState.linksByKey.size > 0) {
       clearRadioLinks();
     }
@@ -879,7 +855,6 @@
     const degrees = new Array(n).fill(0);
     const activeKeys = new Set();
 
-    // Перебор всех пар (i < j)
     for (let i = 0; i < n; i++) {
       const satA = sats[i];
       const posA = satA.position.getValue(time);
@@ -893,11 +868,8 @@
         const evalRes = evaluateLink(posA, posB);
         if (!evalRes.linkUp) continue;
 
-        // Ограничение на число соседей на КА (mesh-параметр)
         if (maxNeigh > 0) {
-          if (degrees[i] >= maxNeigh || degrees[j] >= maxNeigh) {
-            continue;
-          }
+          if (degrees[i] >= maxNeigh || degrees[j] >= maxNeigh) continue;
         }
 
         const key = makeLinkKey(satA.id, satB.id);
@@ -914,9 +886,7 @@
           snrSamples++;
 
           const capMbps = computeCapacityMbps(cfg, evalRes.snrDb);
-          if (isFinite(capMbps)) {
-            capacitySumMbps += capMbps;
-          }
+          if (isFinite(capMbps)) capacitySumMbps += capMbps;
         }
 
         if (isFinite(evalRes.distanceKm)) {
@@ -936,7 +906,6 @@
       }
     }
 
-    // Чистим "мертвые" линки (если отображение включено)
     if (radioState.drawLinks) {
       for (const [key, ent] of radioState.linksByKey.entries()) {
         if (!activeKeys.has(key)) {
@@ -950,7 +919,6 @@
     const avgDistKm = distSamples > 0 ? distSumKm / distSamples : NaN;
     radioState.lastAvgLinkDistKm = isFinite(avgDistKm) ? avgDistKm : 0;
 
-    // Сколько КА реально участвуют хотя бы в одном линке
     let activeSatCount = 0;
     for (let i = 0; i < n; i++) {
       if (degrees[i] > 0) activeSatCount++;
@@ -973,13 +941,12 @@
        <b>Средняя степень узла k:</b> ≈ ${avgDegree.toFixed(2)}<br/>
        <b>Средняя дальность линка:</b> ≈ ${isFinite(avgDistKm) ? avgDistKm.toFixed(1) : "-"} км<br/>
        <b>Оценочная суммарная пропускная способность сети:</b> ≈ ${isFinite(capacitySumMbps) ? capacitySumMbps.toFixed(1) : "-"} Мбит/с<br/>
-       <b>SNR, dB:</b> min=${isFinite(snrMin) ? snrMin.toFixed(1) : "-"}, 
-       avg=${isFinite(snrAvg) ? snrAvg.toFixed(1) : "-"}, 
+       <b>SNR, dB:</b> min=${isFinite(snrMin) ? snrMin.toFixed(1) : "-"},
+       avg=${isFinite(snrAvg) ? snrAvg.toFixed(1) : "-"},
        max=${isFinite(snrMax) ? snrMax.toFixed(1) : "-"}<br/>
        <small>Обновление топологии каждые ${radioState.updatePeriodSec.toFixed(1)} с.</small>`
     );
 
-    // Обновляем single-link summary и энергетику с учётом новой средней дальности
     updateSingleLinkAndEnergySummary();
   });
 })();
