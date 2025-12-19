@@ -32,7 +32,7 @@
 
       <label>
         Высота орбиты, км:
-        <input id="orbit-altitude" name="orbit-altitude" type="number" value="550" />
+        <input id="orbit-altitude" name="orbit-altitude" type="number" value="900" />
       </label>
 
       <label>
@@ -82,12 +82,12 @@
       <form id="bulk-orbits-form">
         <label>
           Высота орбит, км:
-          <input id="bulk-altitude" name="bulk-altitude" type="number" value="550" />
+          <input id="bulk-altitude" name="bulk-altitude" type="number" value="900" />
         </label>
 
         <label>
           Количество КА на каждой орбите:
-          <input id="bulk-num-sats" name="bulk-num-sats" type="number" value="8" min="1" />
+          <input id="bulk-num-sats" name="bulk-num-sats" type="number" value="22" min="1" />
         </label>
 
         <label>
@@ -119,7 +119,7 @@
                       id="bulk-num-orbits"
                       name="bulk-num-orbits"
                       type="number"
-                      value="5"
+                      value="17"
                       min="1"
                       step="1"
               />
@@ -161,7 +161,7 @@
     </div>
   </div>
   <!-- Правая панель: радиосеть КА -->
-  <div id="radio-panel" class="overlay-panel radio-panel">
+  <div id="radio-panel" class="overlay-panel radio-panel hidden">
     <h2>Радиосеть КА</h2>
 
     <!-- Верх (без скролла): общие переключатели -->
@@ -465,9 +465,35 @@
       </div>
     </div>
   </div>
-
-
 <div id="radio-toggle" class="radio-toggle-btn">▲ Радио</div>
+<!-- Правая панель: наземные станции -->
+<div id="ground-panel" class="overlay-panel ground-panel hidden">
+  <h2>Наземная станция</h2>
+
+  <div class="ground-header">
+    <div id="ground-title">Не выбрана</div>
+    <button id="ground-clear" type="button">Сбросить</button>
+  </div>
+<div id="ground-station-details" class="ground-details">
+  <div style="opacity:.75;">Станция не выбрана.</div>
+</div>
+
+  <div class="ground-body">
+    <canvas id="ground-radar" width="260" height="260"></canvas>
+
+    <div class="ground-meta">
+      <div>Порог видимости: <b id="ground-minel">10°</b></div>
+      <div>В зоне: <b id="ground-count">0</b></div>
+    </div>
+
+    <div id="ground-sats" class="ground-sats">
+      <div style="opacity:.75;">Выберите наземную станцию на карте…</div>
+    </div>
+  </div>
+</div>
+
+<div id="ground-toggle" class="ground-toggle-btn">▲ Станции</div>
+
 
 
   <!-- Указываем базовый путь к Cesium (Assets, Widgets, ThirdParty) -->
@@ -483,6 +509,7 @@
 
   <!-- Твоя логика приложения -->
   <script src="/static/js/app.js"></script>
+  <script src="/static/js/ground_stations.js"></script>
   <script src="/static/js/radio.js"></script>
 
 </body>

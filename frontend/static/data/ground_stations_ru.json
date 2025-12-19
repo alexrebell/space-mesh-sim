@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "defaults": {
+    "alt_m": 0,
+    "min_elevation_deg": 10,
+    "azimuth_coverage_deg": 360,
+    "color": "#00f6ff"
+  },
+  "stations": [
+    {
+      "id": "ru-kaliningrad",
+      "name": "Калининград",
+      "lat": 54.7104,
+      "lon": 20.4522,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-murmansk",
+      "name": "Мурманск",
+      "lat": 68.9585,
+      "lon": 33.0827,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-spb",
+      "name": "Санкт‑Петербург",
+      "lat": 59.9311,
+      "lon": 30.3609,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-moscow",
+      "name": "Москва",
+      "lat": 55.7558,
+      "lon": 37.6173,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-kazan",
+      "name": "Казань",
+      "lat": 55.7961,
+      "lon": 49.1064,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-yekaterinburg",
+      "name": "Екатеринбург",
+      "lat": 56.8389,
+      "lon": 60.6057,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-novosibirsk",
+      "name": "Новосибирск",
+      "lat": 55.0084,
+      "lon": 82.9357,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-krasnoyarsk",
+      "name": "Красноярск",
+      "lat": 56.0153,
+      "lon": 92.8932,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-irkutsk",
+      "name": "Иркутск",
+      "lat": 52.2869,
+      "lon": 104.305,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-yakutsk",
+      "name": "Якутск",
+      "lat": 62.0355,
+      "lon": 129.6755,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    },
+    {
+      "id": "ru-vladivostok",
+      "name": "Владивосток",
+      "lat": 43.1155,
+      "lon": 131.8855,
+      "alt_m": 0,
+      "min_elevation_deg": 10,
+      "azimuth_coverage_deg": 360
+    }
+  ]
+}

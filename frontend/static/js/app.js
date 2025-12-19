@@ -14,9 +14,32 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   terrainProvider: new Cesium.EllipsoidTerrainProvider()
 });
 
+// --- Переопределяем кнопку Home (View Home) -> фокус на Россию ---
+if (viewer.homeButton && viewer.homeButton.viewModel && viewer.homeButton.viewModel.command) {
+  viewer.homeButton.viewModel.command.beforeExecute.addEventListener(function (e) {
+    // отменяем стандартный "дом" Cesium (обычно смотрит на США/0 меридиан в зависимости от сцены)
+    e.cancel = true;
+
+    const lon = 70.0; // Долгота
+    const lat = 40.0; // Широта
+    const height = 20000000.0; // 20 000 км
+
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+      orientation: {
+        heading: Cesium.Math.toRadians(0.0),
+        pitch: Cesium.Math.toRadians(-90.0),
+        roll: 0.0
+      },
+      duration: 1.2
+    });
+  });
+}
+
+
 // --- 1a. Явно добавляем офлайн-подложку как первый слой ---
 const offlineImagery = new Cesium.SingleTileImageryProvider({
-  url: "/static/textures/0zaq_ag24_210203.jpg",
+  url: "/static/textures/earth-offline.png",
   rectangle: Cesium.Rectangle.fromDegrees(-180, -90, 180, 90)
 });
 
