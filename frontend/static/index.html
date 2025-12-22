@@ -485,8 +485,21 @@
       <div>Порог видимости: <b id="ground-minel">10°</b></div>
       <div>В зоне: <b id="ground-count">0</b></div>
     </div>
+<!-- Временные окна связи -->
+<div class="ground-pass">
+  <div class="row"><span>Окно (текущее):</span> <b id="ground-pass-current">—</b></div>
+  <div class="row"><span>До закрытия:</span>   <b id="ground-pass-endsin">—</b></div>
+  <div class="row"><span>Окно (следующее):</span><b id="ground-pass-next">—</b></div>
+</div>
 
-    <div id="ground-sats" class="ground-sats">
+<!-- Радио-метрики (упрощённо по видимым КА) -->
+<div class="ground-radio">
+  <div class="row"><span>FSPL (min…max):</span> <b id="ground-fspl">—</b></div>
+  <div class="row"><span>Rx (best…worst):</span> <b id="ground-rx">—</b></div>
+  <div class="row"><span>SNR (best…worst):</span> <b id="ground-snr">—</b></div>
+</div>
+
+      <div id="ground-sats" class="ground-sats">
       <div style="opacity:.75;">Выберите наземную станцию на карте…</div>
     </div>
   </div>
@@ -511,6 +524,7 @@
   <script src="/static/js/app.js"></script>
   <script src="/static/js/ground_stations.js"></script>
   <script src="/static/js/radio.js"></script>
+  <script src="/static/js/mission.js"></script>
 
 </body>
 </html>

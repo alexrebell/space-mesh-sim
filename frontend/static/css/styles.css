@@ -406,3 +406,22 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   cursor: move;
   user-select: none;
 }
+/* ---- Ground station: pass + radio metrics ---- */
+.ground-pass, .ground-radio {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  font-size: 11px;
+}
+
+.ground-pass .row, .ground-radio .row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 2px 0;
+}
+
+.ground-pass b, .ground-radio b { color: #00f6ff; }

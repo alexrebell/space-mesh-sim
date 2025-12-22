@@ -108,6 +108,40 @@
     linksByKey: new Map()
   };
 
+  // --- expose minimal public API for other modules (ground stations etc.) ---
+window.spaceMesh = window.spaceMesh || {};
+window.spaceMesh.radio = window.spaceMesh.radio || {};
+
+window.spaceMesh.radio.getConfig = () => radioState.config;
+
+// Возвращает линк-бюджет для "просто расстояния" (без LoS), по текущему профилю radio.js
+window.spaceMesh.radio.computeBudgetForDistanceMeters = (distanceMeters) => {
+  const cfg = radioState.config;
+
+  // FSPL
+  const fsplDb = computeFsplDb(distanceMeters, cfg.freqMHz);
+
+  // Усиления/потери как в radio.js
+  const { effGainTxDb, effGainRxDb, extraLossDb } = getEffectiveAntennaGains(cfg);
+
+  const totalTxGainDb = effGainTxDb - cfg.txFeederLossDb - cfg.pointingLossDb;
+  const totalRxGainDb = effGainRxDb - cfg.rxFeederLossDb - cfg.pointingLossDb - cfg.polLossDb;
+
+  const noiseFloorDbm = computeNoiseFloorFromTemp(cfg);
+
+  const rxPowerDbm =
+    cfg.txPowerDbm +
+    totalTxGainDb +
+    totalRxGainDb -
+    fsplDb -
+    cfg.implLossDb -
+    extraLossDb;
+
+  const snrDb = rxPowerDbm - noiseFloorDbm;
+
+  return { fsplDb, rxPowerDbm, snrDb, noiseFloorDbm };
+};
+
   // --- 3. Вспомогательные функции по орбитам и спутникам ---
 
   // Собрать все сущности спутников из orbitStore

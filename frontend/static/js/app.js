@@ -64,6 +64,18 @@ const MU = 3.986004418e14; // гравитационный параметр Зе
 const T_SIDEREAL = 86164; // сидерический день, сек
 const OMEGA_E = (2 * Math.PI) / T_SIDEREAL; // угловая скорость вращения Земли, рад/с
 
+// --- Полярная "дырка" вокруг полюсов (8°) ---
+// Запрещаем орбиты, которые заходят в области |lat| > (90 - POLAR_CAP_DEG).
+// Для 8° это |lat| > 82°.
+const POLAR_CAP_DEG = 8;
+const POLAR_LAT_LIMIT_DEG = 90 - POLAR_CAP_DEG; // 82°
+
+function orbitReachesForbiddenPolarZone(inclinationDeg, latLimitDeg) {
+  // maxLat = min(i, 180-i) — максимальная широта трассы (по абсолютной широте)
+  const maxLat = Math.min(inclinationDeg, 180 - inclinationDeg);
+  return maxLat > latLimitDeg;
+}
+
 // Хранилище орбит и КА
 let orbitStore = [];
 let orbitIdCounter = 0;
@@ -868,8 +880,9 @@ if (bulkForm) {
       const incl = k * inclStep;
       const inclRounded = Math.round(incl * 1000) / 1000;
 
-      // Исключаем строго полярную орбиту 90°, если включён флаг
-      if (skipPolar && Math.abs(inclRounded - 90) < 1e-6) {
+      // Исключаем орбиты, которые заходят в полярную "дырку" радиусом 8° (|lat| > 82°)
+      // Для наклонения это означает примерно диапазон (82°..98°).
+      if (skipPolar && orbitReachesForbiddenPolarZone(inclRounded, POLAR_LAT_LIMIT_DEG)) {
         continue;
       }
 
