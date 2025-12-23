@@ -425,3 +425,37 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 }
 
 .ground-pass b, .ground-radio b { color: #00f6ff; }
+
+/* Панель КА заданий */
+#mission-panel {
+  top: 90px;          /* ниже orbit-panel */
+  left: 10px;
+  width: 400px;
+  max-height: 60vh;
+  border-left: 4px solid #ffcc00;
+}
+/* Контейнер для кнопок слева сверху (Орбиты + КА заданий) */
+.top-left-buttons {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  gap: 8px;
+  z-index: 1001;
+}
+
+/* Когда orbit-toggle-btn внутри контейнера — убираем absolute-позиционирование */
+.top-left-buttons .orbit-toggle-btn {
+  position: static;
+}
+/* чтобы панель миссий можно было свободно перемещать */
+#mission-panel {
+  right: auto;
+  bottom: auto;
+}
+
+/* заголовок = “ручка” для перетаскивания */
+#mission-panel h1 {
+  cursor: move;
+  user-select: none;
+}

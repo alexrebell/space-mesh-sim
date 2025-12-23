@@ -17,10 +17,51 @@
 <body>
   <div id="cesiumContainer"></div>
 
-<!-- Кнопка скрыть/показать панель орбит -->
-<div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
+<!-- Верхние кнопки слева: в одну линию -->
+<div id="top-left-buttons" class="top-left-buttons">
+  <div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
+  <div id="mission-toggle" class="orbit-toggle-btn">▲ КА заданий</div>
+</div>
 
   <!-- Панель управления -->
+<!-- Левая панель: КА заданий -->
+<div id="mission-panel" class="overlay-panel hidden">
+  <h1>КА заданий</h1>
+
+  <form id="mission-form">
+    <label>
+      Имя орбиты:
+      <input id="mission-orbit-name" type="text" value="MIS-LEO-450"/>
+    </label>
+
+    <label>
+      Высота орбиты, км:
+      <input id="mission-altitude" type="number" value="450"/>
+    </label>
+
+    <label>
+      Наклонение, °:
+      <input id="mission-inclination" type="number" value="98"/>
+    </label>
+
+    <label>
+      Количество КА:
+      <input id="mission-num-sats" type="number" value="4" min="1"/>
+    </label>
+
+    <label>
+      Участвуют в mesh:
+      <input id="mission-participates-mesh" type="checkbox" checked/>
+    </label>
+
+    <button type="submit">➕ Создать КА заданий</button>
+  </form>
+
+  <div class="hint">
+    КА заданий — отдельный слой, могут временно отключаться от mesh.
+  </div>
+</div>
+
   <div id="orbit-panel" class="overlay-panel">
       <h1>Орбиты и КА</h1>
 
@@ -210,7 +251,7 @@
           </select>
         </label>
 
-        <details open>
+        <details>
           <summary title="Ключевые параметры линк-бюджета: частота/мощность/чувствительность/критерии качества.">
             Линк-бюджет (основные)
           </summary>
@@ -246,7 +287,7 @@
           </label>
         </details>
 
-        <details open>
+        <details>
           <summary title="Параметры усиления/наведения/поляризации зависят от выбранного типа антенны.">
             Антенна (параметры профиля)
           </summary>
@@ -523,8 +564,7 @@
   <!-- Твоя логика приложения -->
   <script src="/static/js/app.js"></script>
   <script src="/static/js/ground_stations.js"></script>
-  <script src="/static/js/radio.js"></script>
   <script src="/static/js/mission.js"></script>
-
+  <script src="/static/js/radio.js"></script>
 </body>
 </html>

@@ -13,11 +13,13 @@
   let orbitStoreRef = null;
   let EARTH_RADIUS = null;
   let startTime = null;
+  let missionStoreRef = null;
 
   if (window.spaceMesh) {
     viewer = window.spaceMesh.viewer;
     clock = window.spaceMesh.clock;
     orbitStoreRef = window.spaceMesh.orbitStore;
+    missionStoreRef = window.spaceMesh.missionStore || [];
     EARTH_RADIUS = window.spaceMesh.EARTH_RADIUS;
     startTime = window.spaceMesh.start;
   } else if (
@@ -145,28 +147,47 @@ window.spaceMesh.radio.computeBudgetForDistanceMeters = (distanceMeters) => {
   // --- 3. Вспомогательные функции по орбитам и спутникам ---
 
   // Собрать все сущности спутников из orbitStore
-  function collectAllSatellites() {
-    const sats = [];
+function collectAllSatellites() {
+  const sats = [];
 
-    orbitStoreRef.forEach((group) => {
+  // --- КА связи ---
+  orbitStoreRef.forEach((group) => {
+    if (!group || !Array.isArray(group.satellites)) return;
+
+    for (const sat of group.satellites) {
+      if (!sat) continue;
+
+      const ent =
+        sat.position?.getValue ? sat :
+        sat.entity?.position?.getValue ? sat.entity :
+        null;
+
+      if (ent) sats.push(ent);
+    }
+  });
+
+  // --- КА заданий (если есть) ---
+  if (Array.isArray(missionStoreRef)) {
+    missionStoreRef.forEach((group) => {
       if (!group || !Array.isArray(group.satellites)) return;
 
       for (const sat of group.satellites) {
-        if (!sat) continue;
+        const ent = sat.entity || sat;
+        if (!ent || !ent.position?.getValue) continue;
 
-        // 1) sat — Cesium.Entity
-        if (sat.position && sat.position.getValue) {
-          sats.push(sat);
-        }
-        // 2) sat.entity — Cesium.Entity
-        else if (sat.entity && sat.entity.position && sat.entity.position.getValue) {
-          sats.push(sat.entity);
+        // 🔑 КЛЮЧЕВОЙ ФИЛЬТР
+        const participates =
+          ent.properties?.participatesInMesh?.getValue?.() !== false;
+
+        if (participates) {
+          sats.push(ent);
         }
       }
     });
-
-    return sats;
   }
+
+  return sats;
+}
 
   // Средний орбитальный период (для энергетики на виток)
   function computeAverageOrbitPeriodSec() {
