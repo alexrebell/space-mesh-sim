@@ -20,7 +20,7 @@
 <!-- Верхние кнопки слева: в одну линию -->
 <div id="top-left-buttons" class="top-left-buttons">
   <div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
-  <div id="mission-toggle" class="orbit-toggle-btn">▲ КА заданий</div>
+  <div id="mission-toggle" class="orbit-toggle-btn">▼ КА заданий</div>
 </div>
 
   <!-- Панель управления -->
@@ -47,11 +47,6 @@
     <label>
       Количество КА:
       <input id="mission-num-sats" type="number" value="4" min="1"/>
-    </label>
-
-    <label>
-      Участвуют в mesh:
-      <input id="mission-participates-mesh" type="checkbox" checked/>
     </label>
 
     <button type="submit">➕ Создать КА заданий</button>
@@ -231,18 +226,13 @@
 
     </div>
 
-    <!-- Скролл-область: тип антенны + все входные параметры -->
-    <div class="radio-panel-scroll">
-      <form id="radio-form">
-        <h3 style="margin:6px 0 2px;">Профиль радиоканала</h3>
-        <small style="display:block; margin-bottom:6px; color:#aaa;">
-          Сначала выберите тип антенны — ниже появятся относящиеся к нему параметры.
-        </small>
+
 
         <!-- Главный параметр -->
         <label title="Определяет модель усилений/потерь и то, какие параметры антенны показывать.">
           Тип антенны:
           <select id="radio-antenna-type">
+
             <option value="directional">Направленная (узкий луч)</option>
             <option value="sector">Секторная (широкий луч)</option>
             <option value="phased">ФАР (электронное сканирование)</option>
@@ -250,6 +240,30 @@
             <option value="custom">Пользовательская / кастомная</option>
           </select>
         </label>
+
+    <!-- Скролл-область: тип антенны + все входные параметры -->
+    <div class="radio-panel-scroll">
+      <form id="radio-form">
+        <h3 style="margin:6px 0 2px;">Профиль радиоканала</h3>
+        <small style="display:block; margin-bottom:6px; color:#aaa;">
+
+        </small>
+<!-- Профили ФАР 25 ГГц (только для phased) -->
+<div id="phased-profiles-row" class="radio-inline-row" style="margin:6px 0 10px; display:none;">
+  <label title="Быстрое заполнение параметров для ФАР (25 ГГц). Работает только когда выбран тип антенны: ФАР.">
+    Профиль ФАР (25 ГГц):
+    <select id="radio-phased-profile">
+      <option value="manual" selected>Ручной ввод</option>
+      <option value="A">Профиль A — Дальность 1600 км (баланс)</option>
+      <option value="B">Профиль B — Скорость (throughput)</option>
+      <option value="C">Профиль C — Надёжность (доступность)</option>
+    </select>
+  </label>
+
+  <small style="display:block; color:#aaa; margin-top:4px;">
+    Выберите профиль и нажмите «Применить параметры» — поля заполнятся автоматически.
+  </small>
+</div>
 
         <details>
           <summary title="Ключевые параметры линк-бюджета: частота/мощность/чувствительность/критерии качества.">

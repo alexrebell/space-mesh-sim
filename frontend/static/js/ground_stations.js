@@ -654,7 +654,6 @@ viewer.selectedEntityChanged.addEventListener((ent) => {
   viewer.scene.requestRender();
 });
 
-
   resetPanelUI();
   loadStations().catch(console.error);
 })();

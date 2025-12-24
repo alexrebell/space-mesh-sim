@@ -43,7 +43,7 @@
   if (missionPanel && missionToggle) {
     missionToggle.addEventListener("click", () => {
       const hidden = missionPanel.classList.toggle("hidden");
-      missionToggle.textContent = hidden ? "▲ КА заданий" : "▼ КА заданий";
+      missionToggle.textContent = hidden ? "▼ КА заданий" : "▲ КА заданий";
     });
   }
 
@@ -276,7 +276,7 @@
       return Cesium.Cartesian3.fromElements(x, y, z, result);
     }, false);
 
-    const fillCss = cesiumColorToCss(color);
+    const fillCss = "#ff004c"; // яркий неоново-красный
     const img = makeSquareDataUri(fillCss);
 
     const ent = viewer.entities.add({
@@ -284,8 +284,8 @@
       position: positionProperty,
       billboard: {
         image: img,
-        width: 14,
-        height: 14,
+        width: 22,
+        height: 22,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         scaleByDistance: new Cesium.NearFarScalar(1e6, 1.2, 1.2e7, 0.6)
@@ -382,7 +382,6 @@
   const altEl = document.getElementById("mission-altitude");
   const incEl = document.getElementById("mission-inclination");
   const numEl = document.getElementById("mission-num-sats");
-  const meshEl = document.getElementById("mission-participates-mesh");
 
   const clearBtn = document.getElementById("clear-missions") || document.getElementById("mission-clear-all");
 
@@ -393,7 +392,7 @@
     const altitudeKm = safeNum(altEl ? altEl.value : 450, 450, 120, 2000);
     const inclinationDeg = safeNum(incEl ? incEl.value : 98, 98, 0, 180);
     const numSatellites = Math.max(1, Math.floor(safeNum(numEl ? numEl.value : 4, 4, 1, 500)));
-    const participatesInMesh = meshEl ? !!meshEl.checked : true;
+    const participatesInMesh = true;
 
     addMissionOrbitWithSatellites({
       name,

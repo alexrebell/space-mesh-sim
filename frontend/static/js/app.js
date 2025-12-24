@@ -453,8 +453,8 @@ function deleteAllOrbits() {
     }
   }
 
-  orbitStore = [];
-  renderOrbitList();
+orbitStore.length = 0;   // важно: НЕ теряем ссылку на массив
+renderOrbitList();
 
   // сбрасываем выбор линка (чтобы не держались ссылки на удалённые Entity)
   selectedSatA = null;
@@ -471,6 +471,12 @@ function deleteAllOrbits() {
   }
 
   viewer.selectedEntity = undefined;
+  // сообщаем радиосети, что топология изменилась
+window.dispatchEvent(new CustomEvent("spaceMesh:topologyChanged"));
+if (window.spaceMesh?.radio?.onTopologyChanged) {
+  window.spaceMesh.radio.onTopologyChanged();
+}
+
 }
 
 // --- 3. Удаление орбит и КА ---
@@ -490,6 +496,11 @@ function deleteOrbit(orbitId) {
 
   orbitStore.splice(idx, 1);
   renderOrbitList();
+  window.dispatchEvent(new CustomEvent("spaceMesh:topologyChanged"));
+if (window.spaceMesh?.radio?.onTopologyChanged) {
+  window.spaceMesh.radio.onTopologyChanged();
+}
+
 }
 
 function deleteOneSatelliteFromOrbit(orbitId) {
@@ -500,6 +511,8 @@ function deleteOneSatelliteFromOrbit(orbitId) {
   const satEntity = group.satellites.pop();
   viewer.entities.remove(satEntity);
   renderOrbitList();
+  window.dispatchEvent(new CustomEvent("spaceMesh:topologyChanged"));
+
 }
 
 function addOneSatelliteToOrbit(orbitId) {
@@ -515,6 +528,11 @@ function addOneSatelliteToOrbit(orbitId) {
   group.satellites.push(satEntity);
 
   renderOrbitList();
+  window.dispatchEvent(new CustomEvent("spaceMesh:topologyChanged"));
+if (window.spaceMesh?.radio?.onTopologyChanged) {
+  window.spaceMesh.radio.onTopologyChanged();
+}
+
 }
 
 // --- Перерисовка списка орбит ---
@@ -595,13 +613,6 @@ function renderOrbitList() {
     // --- Кнопки действий ---
     const actions = document.createElement("div");
     actions.className = "orbit-actions";
-
-    const bulkDeleteAllBtn = document.getElementById("bulk-delete-all");
-    if (bulkDeleteAllBtn) {
-      bulkDeleteAllBtn.addEventListener("click", () => {
-        deleteAllOrbits();
-      });
-}
 
     const btnDeleteOrbit = document.createElement("button");
     btnDeleteOrbit.className = "btn-delete-orbit";
@@ -867,37 +878,71 @@ if (bulkForm) {
 
     const skipPolar = skipPolarInput.checked;
 
-    // Диапазон наклонений: [0 .. 180), 180° ИСКЛЮЧАЕМ
+// Диапазон наклонений: [0 .. 180), 180° ИСКЛЮЧАЕМ
+// Требование: создать РОВНО numOrbits орбит.
+// Если включён skipPolar — распределяем наклонения равномерно по ДОПУСТИМЫМ зонам,
+// "перепрыгивая" запрещённую полосу вокруг 90°.
+
+const gapWidthDeg = 2 * POLAR_CAP_DEG;            // напр. 16° при POLAR_CAP_DEG=8
+const lowMaxDeg = POLAR_LAT_LIMIT_DEG;            // напр. 82°
+const highMinDeg = 180 - POLAR_LAT_LIMIT_DEG;     // напр. 98°
+const allowedSpanDeg = 180 - (skipPolar ? gapWidthDeg : 0); // 180 или 164
+
+if (inclInfoEl) {
+  if (!skipPolar) {
     const inclStep = 180 / numOrbits;
+    inclInfoEl.textContent = `Шаг между орбитами: ${inclStep.toFixed(
+      2
+    )}° (равномерно от 0 до 180°, 180° исключена)`;
+  } else {
+    const effStep = allowedSpanDeg / numOrbits;
+    inclInfoEl.textContent =
+      `Исключение околополярных включено: запрещённая зона ~(${lowMaxDeg.toFixed(1)}°..${highMinDeg.toFixed(1)}°). ` +
+      `Наклонения распределяются равномерно по допустимым зонам. ` +
+      `Эффективный шаг по допустимому диапазону: ${effStep.toFixed(2)}° (создастся ровно ${numOrbits} орбит)`;
+  }
+}
 
-    if (inclInfoEl) {
-      inclInfoEl.textContent = `Шаг между орбитами: ${inclStep.toFixed(
-        2
-      )}° (равномерно от 0 до 180°, 180° исключена)`;
+for (let k = 0; k < numOrbits; k++) {
+  let incl;
+
+  if (!skipPolar) {
+    // Старое поведение: равномерно по [0..180)
+    incl = (k * 180) / numOrbits;
+  } else {
+    // Новое поведение: равномерно по допустимому диапазону, с "перепрыгиванием" gap
+    // Берём параметр t в [0..1) и раскладываем его по длине allowedSpanDeg (= 164° при cap=8°).
+    const t = k / numOrbits;                 // 0 .. (1 - 1/N)
+    const s = t * allowedSpanDeg;            // 0 .. <allowedSpanDeg
+
+    // s в [0..82] -> incl = s
+    // s в (82..164) -> incl = s + gapWidth (перепрыгиваем 82..98)
+    incl = (s <= lowMaxDeg) ? s : (s + gapWidthDeg);
+
+    // На всякий случай, если из-за чисел попадём в запрещённую — чуть сдвигаем
+    if (orbitReachesForbiddenPolarZone(incl, POLAR_LAT_LIMIT_DEG)) {
+      incl = highMinDeg; // прижимаем к краю разрешённой зоны
     }
 
-    for (let k = 0; k < numOrbits; k++) {
-      const incl = k * inclStep;
-      const inclRounded = Math.round(incl * 1000) / 1000;
+    // Защитим от 180° (всё равно исключаем верхнюю границу)
+    if (incl >= 180) incl = 180 - 1e-6;
+  }
 
-      // Исключаем орбиты, которые заходят в полярную "дырку" радиусом 8° (|lat| > 82°)
-      // Для наклонения это означает примерно диапазон (82°..98°).
-      if (skipPolar && orbitReachesForbiddenPolarZone(inclRounded, POLAR_LAT_LIMIT_DEG)) {
-        continue;
-      }
+  const inclRounded = Math.round(incl * 1000) / 1000;
 
-      const cfg = {
-        name: `Shell i=${inclRounded.toFixed(1)}°`,
-        altitudeKm,
-        inclinationDeg: inclRounded,
-        numSatellites,
-        evenSpacing,
-        phaseStepDeg
-      };
+  const cfg = {
+    name: `Shell i=${inclRounded.toFixed(1)}°`,
+    altitudeKm,
+    inclinationDeg: inclRounded,
+    numSatellites,
+    evenSpacing,
+    phaseStepDeg
+  };
 
-      const color = getColorByIndex(userOrbitIndex++);
-      addOrbitWithSatellites(cfg, color);
-    }
+  const color = getColorByIndex(userOrbitIndex++);
+  addOrbitWithSatellites(cfg, color);
+}
+
   });
 }
 
@@ -935,6 +980,11 @@ window.spaceMesh = {
   EARTH_RADIUS,
   start
 };
+
+const bulkDeleteAllBtn = document.getElementById("bulk-delete-all");
+if (bulkDeleteAllBtn) {
+  bulkDeleteAllBtn.addEventListener("click", deleteAllOrbits);
+}
 
 // --- 8. Кнопка скрыть/показать панель "Орбиты и КА" ---
 const orbitPanel = document.getElementById("orbit-panel");

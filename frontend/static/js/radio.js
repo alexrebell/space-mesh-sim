@@ -143,11 +143,13 @@ window.spaceMesh.radio.computeBudgetForDistanceMeters = (distanceMeters) => {
 
   return { fsplDb, rxPowerDbm, snrDb, noiseFloorDbm };
 };
+window.spaceMesh.radio.onTopologyChanged = onTopologyChanged;
+
 
   // --- 3. Вспомогательные функции по орбитам и спутникам ---
 
   // Собрать все сущности спутников из orbitStore
-function collectAllSatellites() {
+function collectAllSatellites(time) {
   const sats = [];
 
   // --- КА связи ---
@@ -175,13 +177,15 @@ function collectAllSatellites() {
         const ent = sat.entity || sat;
         if (!ent || !ent.position?.getValue) continue;
 
-        // 🔑 КЛЮЧЕВОЙ ФИЛЬТР
-        const participates =
-          ent.properties?.participatesInMesh?.getValue?.() !== false;
+        // КЛЮЧЕВОЙ ФИЛЬТР
+        const state =
+          ent.properties?.state?.getValue?.(time) ??
+          ent.properties?.state?.getValue?.() ??
+          ent.properties?.state;
 
-        if (participates) {
-          sats.push(ent);
-        }
+        const isBusy = String(state || "IDLE").toUpperCase() !== "IDLE";
+
+        if (!isBusy) sats.push(ent);
       }
     });
   }
@@ -431,6 +435,18 @@ function collectAllSatellites() {
     });
   }
 
+  function onTopologyChanged() {
+  // удалить все текущие линии радиосети
+  clearRadioLinks();
+
+  // заставить mesh пересчитаться на ближайшем тике
+  radioState.lastUpdateSeconds = 0;
+
+  // (опционально) подсказка в панели, чтобы было видно что сеть сброшена
+  updateRadioMeshInfo("Топология изменилась — радиосеть сброшена, пересчёт на следующем тике.");
+}
+
+
   function createRadioLinkEntity(satA, satB, snrDb) {
     const material = makeLinkMaterial(snrDb);
 
@@ -483,6 +499,9 @@ function collectAllSatellites() {
 
   // Антенна – блоки
   const antennaTypeSelect   = document.getElementById("radio-antenna-type");
+    // Профили ФАР
+  const phasedProfilesRow   = document.getElementById("phased-profiles-row");
+  const phasedProfileSelect = document.getElementById("radio-phased-profile");
   const antennaCommonBlock  = document.getElementById("antenna-common-block");
   const antennaPhasedBlock  = document.getElementById("antenna-phased-block");
   const antennaOmniBlock    = document.getElementById("antenna-omni-block");
@@ -518,6 +537,11 @@ function collectAllSatellites() {
     if (antennaCustomBlock) {
       antennaCustomBlock.style.display = (t === "custom") ? "block" : "none";
     }
+      // Профили показываем только для ФАР
+  if (phasedProfilesRow) {
+    phasedProfilesRow.style.display = (t === "phased") ? "block" : "none";
+  }
+
   }
 
   // --- 10. Обработчики чекбоксов и формы ---
@@ -601,9 +625,264 @@ function collectAllSatellites() {
     updateAntennaBlocksVisibility(radioState.config.antennaType);
   }
 
+  // -------------------------------
+// Phased Array (ФАР) profiles (25 GHz)
+// -------------------------------
+
+// Жёстко заданные профили (можно позже заменить на загрузку JSON)
+const PHASED_PROFILES = {
+  A: {
+    name: "A — Дальность 1600 км (баланс)",
+    // Link budget
+    freqMHz: 25000,
+    txPowerDbm: 33,
+    rxSensDbm: -102,
+    minSnrDb: 5,
+    maxRangeKm: 0,
+    noiseFloorDbm: -110,
+
+    // Antenna (phased)
+    antennaType: "phased",
+    gainTxDb: 32,
+    gainRxDb: 32,
+    beamWidthDeg: 4,
+    pointingLossDb: 1.0,
+    polLossDb: 0.3,
+    phasedMaxScanDeg: 30,
+    phasedScanLossDb: 1.7,
+
+    // Feeder/impl
+    txFeederLossDb: 1.0,
+    rxFeederLossDb: 1.0,
+    implLossDb: 1.0,
+
+    // MCS
+    modulation: "QPSK",
+    codingRate: 0.5,     // 1/2
+    dataRateMbps: 50,
+    bandwidthMHz: 10,
+
+    // Noise
+    sysTempK: 700,
+    noiseBandwidthMHz: 10,
+
+    // Mesh
+    maxNeighborsPerSat: 4,
+    routingMetric: "snr_distance",
+
+    // Power
+    txElecPowerW: 80,
+    dutyCycle: 0.2,      // 20%
+    refDistanceKm: 1600
+  },
+
+  B: {
+    name: "B — Скорость (throughput)",
+    // База A + отличия (и чуть усиление)
+    freqMHz: 25000,
+    txPowerDbm: 33,
+    rxSensDbm: -102,
+    minSnrDb: 6,        // рекомендовано
+    maxRangeKm: 0,
+    noiseFloorDbm: -110,
+
+    antennaType: "phased",
+    gainTxDb: 38,
+    gainRxDb: 38,
+    beamWidthDeg: 4,
+    pointingLossDb: 1.0,
+    polLossDb: 0.3,
+    phasedMaxScanDeg: 30,
+    phasedScanLossDb: 1.7,
+
+    txFeederLossDb: 1.0,
+    rxFeederLossDb: 1.0,
+    implLossDb: 1.0,
+
+    modulation: "QPSK",
+    codingRate: 0.5,    // 1/2
+    dataRateMbps: 100,
+    bandwidthMHz: 20,
+
+    sysTempK: 700,
+    noiseBandwidthMHz: 20,
+
+    maxNeighborsPerSat: 4,
+    routingMetric: "snr_distance",
+
+    txElecPowerW: 80,
+    dutyCycle: 0.2,
+    refDistanceKm: 1600
+  },
+
+  C: {
+    name: "C — Надёжность (доступность)",
+    freqMHz: 25000,
+    txPowerDbm: 33,
+    rxSensDbm: -102,
+    minSnrDb: 4,        // ниже порог
+    maxRangeKm: 0,
+    noiseFloorDbm: -110,
+
+    antennaType: "phased",
+    gainTxDb: 32,
+    gainRxDb: 32,
+    beamWidthDeg: 4,
+    pointingLossDb: 1.0,
+    polLossDb: 0.3,
+    phasedMaxScanDeg: 25,    // 20–25 → берём 25
+    phasedScanLossDb: 1.5,
+
+    txFeederLossDb: 1.0,
+    rxFeederLossDb: 1.0,
+    implLossDb: 1.0,
+
+    modulation: "QPSK",
+    codingRate: 0.5,
+    dataRateMbps: 30,    // “лучше 30”
+    bandwidthMHz: 10,
+
+    sysTempK: 700,
+    noiseBandwidthMHz: 10,
+
+    maxNeighborsPerSat: 6,   // больше связности
+    routingMetric: "snr_distance",
+
+    txElecPowerW: 80,
+    dutyCycle: 0.2,
+    refDistanceKm: 1600
+  }
+};
+
+// Утилита: поставить value в input/select если элемент существует
+function setElValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el || value === undefined || value === null) return;
+  el.value = String(value);
+}
+
+// Утилита: выбрать option в select по value
+function setSelectValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el || value === undefined || value === null) return;
+  el.value = String(value);
+}
+
+// Применить профиль к UI (чтобы пользователь ВИДЕЛ заполнение)
+function applyPhasedProfileToUI(profileKey) {
+  const p = PHASED_PROFILES[profileKey];
+  if (!p) return false;
+
+  // Принудительно включаем ФАР в UI
+  setSelectValue("radio-antenna-type", "phased");
+  radioState.config.antennaType = "phased";
+  updateAntennaBlocksVisibility("phased");
+
+  // Link budget
+  setElValue("radio-freq-mhz", p.freqMHz);
+  setElValue("radio-tx-power", p.txPowerDbm);
+  setElValue("radio-rx-sens", p.rxSensDbm);
+  setElValue("radio-min-snr", p.minSnrDb);
+  setElValue("radio-max-range-km", p.maxRangeKm);
+  setElValue("radio-noise-floor", p.noiseFloorDbm);
+
+  // Antenna common
+  setElValue("radio-gain-tx", p.gainTxDb);
+  setElValue("radio-gain-rx", p.gainRxDb);
+  setElValue("radio-beam-width", p.beamWidthDeg);
+  setElValue("radio-pointing-loss", p.pointingLossDb);
+  setElValue("radio-pol-loss", p.polLossDb);
+
+  // Phased only
+  setElValue("radio-phased-max-scan", p.phasedMaxScanDeg);
+  setElValue("radio-phased-scan-loss", p.phasedScanLossDb);
+
+  // Losses
+  setElValue("radio-tx-feeder-loss", p.txFeederLossDb);
+  setElValue("radio-rx-feeder-loss", p.rxFeederLossDb);
+  setElValue("radio-impl-loss", p.implLossDb);
+
+  // MCS
+  setSelectValue("radio-modulation", p.modulation);
+  setSelectValue("radio-coding-rate", p.codingRate); // у тебя values: 0.5 / 0.6667 / 0.75
+  setElValue("radio-data-rate-mbps", p.dataRateMbps);
+  setElValue("radio-bandwidth-mhz", p.bandwidthMHz);
+
+  // Noise
+  setElValue("radio-sys-temp-k", p.sysTempK);
+  setElValue("radio-noise-bandwidth-mhz", p.noiseBandwidthMHz);
+
+  // Mesh
+  setElValue("radio-mesh-max-neighbors", p.maxNeighborsPerSat);
+  setSelectValue("radio-mesh-metric", p.routingMetric);
+
+  // Power
+  setElValue("radio-tx-elec-power", p.txElecPowerW);
+  setElValue("radio-duty-cycle", p.dutyCycle * 100.0);
+  setElValue("radio-ref-distance-km", p.refDistanceKm);
+
+  return true;
+}
+
+// Применить профиль сразу в config (без чтения из формы)
+function applyPhasedProfileToConfig(profileKey) {
+  const p = PHASED_PROFILES[profileKey];
+  if (!p) return false;
+
+  const cfg = radioState.config;
+
+  // просто переносим значения
+  Object.assign(cfg, {
+    freqMHz: p.freqMHz,
+    txPowerDbm: p.txPowerDbm,
+    rxSensDbm: p.rxSensDbm,
+    minSnrDb: p.minSnrDb,
+    maxRangeKm: p.maxRangeKm,
+    noiseFloorDbm: p.noiseFloorDbm,
+
+    antennaType: "phased",
+    gainTxDb: p.gainTxDb,
+    gainRxDb: p.gainRxDb,
+    beamWidthDeg: p.beamWidthDeg,
+    pointingLossDb: p.pointingLossDb,
+    polLossDb: p.polLossDb,
+    phasedMaxScanDeg: p.phasedMaxScanDeg,
+    phasedScanLossDb: p.phasedScanLossDb,
+
+    txFeederLossDb: p.txFeederLossDb,
+    rxFeederLossDb: p.rxFeederLossDb,
+    implLossDb: p.implLossDb,
+
+    modulation: p.modulation,
+    codingRate: p.codingRate,
+    dataRateMbps: p.dataRateMbps,
+    bandwidthMHz: p.bandwidthMHz,
+
+    sysTempK: p.sysTempK,
+    noiseBandwidthMHz: p.noiseBandwidthMHz,
+
+    maxNeighborsPerSat: p.maxNeighborsPerSat,
+    routingMetric: p.routingMetric,
+
+    txElecPowerW: p.txElecPowerW,
+    dutyCycle: p.dutyCycle,
+    refDistanceKm: p.refDistanceKm
+  });
+
+  return true;
+}
   if (radioForm) {
     radioForm.addEventListener("submit", function (e) {
       e.preventDefault();
+      // --- Если выбран профиль ФАР — сначала заполняем UI и config ---
+      if (phasedProfileSelect) {
+        const key = phasedProfileSelect.value;
+        if (key && key !== "manual") {
+          applyPhasedProfileToUI(key);      // чтобы ПОЛЯ поменялись на странице
+          applyPhasedProfileToConfig(key);  // чтобы cfg точно стал как в профиле
+          // дальше код ниже прочитает эти же значения из формы (и ничего не сломается)
+        }
+      }
 
       const cfg = radioState.config;
 
@@ -969,7 +1248,7 @@ function collectAllSatellites() {
     }
     radioState.lastUpdateSeconds = seconds;
 
-    const sats = collectAllSatellites();
+    const sats = collectAllSatellites(time);
     const n = sats.length;
 
     if (n < 2) {
@@ -1104,6 +1383,8 @@ function collectAllSatellites() {
     // Обновляем single-link summary и энергетику с учётом новой средней дальности
     updateSingleLinkAndEnergySummary();
   });
+  // --- 13. Реакция на изменение топологии (орбиты/КА пересозданы/удалены) ---
+  window.addEventListener("spaceMesh:topologyChanged", onTopologyChanged);
 })();
 
 // --- Кнопка показать / скрыть панель "Радиосеть КА" ---
