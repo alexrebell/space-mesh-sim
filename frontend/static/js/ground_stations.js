@@ -296,7 +296,16 @@ for (const s of sats) {
 
     for (let i = 0; i < all.length; i++) {
       const sat = all[i];
+
+      // 1. Только спутники
       if (!isSatellite(sat, time)) continue;
+
+      // 2. ЖЁСТКО исключаем MIS-КА
+      const isMission =
+        sat.properties?.isMissionSatellite?.getValue?.(time) ??
+        sat.properties?.isMissionSatellite;
+
+      if (isMission === true) continue;
 
       const satPos = sat.position?.getValue(time);
       if (!satPos) continue;
@@ -422,6 +431,13 @@ if (ui.snr) ui.snr.textContent =
     for (let i = 0; i < all.length; i++) {
       const sat = all[i];
       if (!isSatellite(sat, t)) continue;
+
+      // исключаем MIS-КА
+      const isMission =
+        sat.properties?.isMissionSatellite?.getValue?.(t) ??
+        sat.properties?.isMissionSatellite;
+
+      if (isMission === true) continue;
 
       const satPos = sat.position?.getValue(t);
       if (!satPos) continue;

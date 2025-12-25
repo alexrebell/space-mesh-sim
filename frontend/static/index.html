@@ -48,13 +48,21 @@
       Количество КА:
       <input id="mission-num-sats" type="number" value="4" min="1"/>
     </label>
-
     <button type="submit">➕ Создать КА заданий</button>
   </form>
 
   <div class="hint">
     КА заданий — отдельный слой, могут временно отключаться от mesh.
   </div>
+    <!-- Список миссионных орбит (MIS) -->
+    <div id="mission-list-container" style="margin-top:10px;">
+        <h2 style="margin:8px 0;">Текущие орбиты (MIS)</h2>
+        <ul id="mission-list"></ul>
+
+        <button id="mission-delete-all" type="button" style="background:#d9534f; margin-top:6px;">
+            🗑 Удалить все MIS-орбиты и КА
+        </button>
+    </div>
 </div>
 
   <div id="orbit-panel" class="overlay-panel">
@@ -135,7 +143,6 @@
             checked
           />
         </label>
-
         <label>
           Фазовый шаг между КА, °:
           <input
@@ -148,7 +155,6 @@
           />
           <small>(используется, если равномерное распределение отключено)</small>
         </label>
-
           <label>
               Количество орбит:
               <input
@@ -160,11 +166,9 @@
                       step="1"
               />
           </label>
-
           <div id="bulk-incl-info" style="font-size:10px; color:#aaa; margin-top:4px;">
               Шаг наклонения: —
           </div>
-
         <label>
           Исключить полярные орбиты (90°):
           <input
@@ -174,20 +178,17 @@
             checked
           />
         </label>
-
         <button type="submit">🚀 Создать массив орбит</button>
         <button id="bulk-delete-all" type="button" style="background:#d9534f; margin-top:6px;">
           🗑 Удалить все орбиты и КА
         </button>
       </form>
     </details>
-
     <!-- Список орбит -->
     <div id="orbit-list-container">
       <h2>Текущие орбиты</h2>
       <ul id="orbit-list"></ul>
     </div>
-
     <div id="link-panel">
       <h2>Линк между КА</h2>
       <div id="link-info-body">
@@ -199,35 +200,27 @@
   <!-- Правая панель: радиосеть КА -->
   <div id="radio-panel" class="overlay-panel radio-panel hidden">
     <h2>Радиосеть КА</h2>
-
     <!-- Верх (без скролла): общие переключатели -->
     <div class="radio-panel-top">
       <label title="Включает расчёт радиолинков между КА и обновление статистики.">
         <input type="checkbox" id="radio-enabled"/>
         Активировать моделирование радиосвязи
       </label>
-
       <label title="Включает/выключает визуализацию линий радиолинков на сцене.">
         <input type="checkbox" id="radio-draw-links" checked />
         Отрисовывать линии линков
       </label>
-
       <label title="Если включено — слишком близкие КА не будут соединяться линками (уменьшает лаги при скучивании).">
         <input type="checkbox" id="radio-limit-min-distance" />
         Ограничить линк снизу (не строить, если ближе)
       </label>
-
       <div id="radio-min-distance-row" class="radio-inline-row" style="display:none;">
         <label title="Минимальная дистанция между КА (км). Если расстояние меньше — линк пропускается (не рисуем и не считаем).">
           Мин. дистанция, км:
           <input id="radio-min-link-distance-km" type="number" value="400" min="0" step="1" />
         </label>
       </div>
-
     </div>
-
-
-
         <!-- Главный параметр -->
         <label title="Определяет модель усилений/потерь и то, какие параметры антенны показывать.">
           Тип антенны:
@@ -561,13 +554,6 @@
 </div>
 
 <div id="ground-toggle" class="ground-toggle-btn">▲ Станции</div>
-
-
-
-  <!-- Указываем базовый путь к Cesium (Assets, Widgets, ThirdParty) -->
-<!--?  <script>-->
-<!--?    window.CESIUM_BASE_URL = "/static/Cesium/Build/Cesium/";-->
-<!--?  </script>-->
 
   <!-- Локальный Cesium.js -->
   <script

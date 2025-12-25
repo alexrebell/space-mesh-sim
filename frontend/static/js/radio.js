@@ -145,7 +145,6 @@ window.spaceMesh.radio.computeBudgetForDistanceMeters = (distanceMeters) => {
 };
 window.spaceMesh.radio.onTopologyChanged = onTopologyChanged;
 
-
   // --- 3. Вспомогательные функции по орбитам и спутникам ---
 
   // Собрать все сущности спутников из orbitStore
@@ -446,7 +445,6 @@ function collectAllSatellites(time) {
   updateRadioMeshInfo("Топология изменилась — радиосеть сброшена, пересчёт на следующем тике.");
 }
 
-
   function createRadioLinkEntity(satA, satB, snrDb) {
     const material = makeLinkMaterial(snrDb);
 
@@ -495,7 +493,6 @@ function collectAllSatellites(time) {
     const v = parseFloat(radioMinLinkDistanceInput.value);
     radioState.config.minLinkDistanceKm = isFinite(v) && v >= 0 ? v : radioState.config.minLinkDistanceKm;
   }
-
 
   // Антенна – блоки
   const antennaTypeSelect   = document.getElementById("radio-antenna-type");
@@ -626,8 +623,8 @@ function collectAllSatellites(time) {
   }
 
   // -------------------------------
-// Phased Array (ФАР) profiles (25 GHz)
-// -------------------------------
+  // Phased Array (ФАР) profiles (25 GHz)
+  // -------------------------------
 
 // Жёстко заданные профили (можно позже заменить на загрузку JSON)
 const PHASED_PROFILES = {

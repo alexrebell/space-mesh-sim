@@ -370,6 +370,155 @@
     }
     missionStore.length = 0; // сохраняем ссылку
   }
+  // -------------------------
+  // UI: список MIS-орбит и управление (как "Текущие орбиты")
+  // -------------------------
+
+  const missionListEl = document.getElementById("mission-list");
+  const deleteAllBtn = document.getElementById("mission-delete-all");
+
+  function emitTopologyChanged() {
+    window.dispatchEvent(new Event("spaceMesh:topologyChanged"));
+  }
+
+  function formatKm(meters) {
+    return (meters / 1000).toFixed(0);
+  }
+
+  function formatDeg(rad) {
+    return (rad * 180 / Math.PI).toFixed(1);
+  }
+
+  function rebuildMissionSatellites(group, newCount) {
+    if (!group || !group.orbit) return;
+
+    // remove old satellites
+    if (Array.isArray(group.satellites)) {
+      group.satellites.forEach(ent => viewer.entities.remove(ent));
+    }
+    group.satellites = [];
+
+    // update orbit count
+    group.orbit.numSatellites = newCount;
+
+    // recreate satellites with consistent spacing
+    for (let i = 0; i < newCount; i++) {
+      const satEnt = createMissionSatelliteOnOrbit(
+        group.orbit,
+        group.color,
+        i,
+        newCount,
+        true // participatesInMesh (как у тебя сейчас)
+      );
+      group.satellites.push(satEnt);
+    }
+
+    emitTopologyChanged();
+    renderMissionList();
+  }
+
+  function deleteMissionOrbitById(id) {
+    const idx = missionStore.findIndex(g => g && g.id === id);
+    if (idx < 0) return;
+
+    const g = missionStore[idx];
+    if (g?.polylineEntity) viewer.entities.remove(g.polylineEntity);
+    if (Array.isArray(g?.satellites)) g.satellites.forEach(ent => viewer.entities.remove(ent));
+
+    missionStore.splice(idx, 1);
+
+    emitTopologyChanged();
+    renderMissionList();
+  }
+
+  function addOneSatToMission(id) {
+    const g = missionStore.find(x => x && x.id === id);
+    if (!g || !g.orbit) return;
+
+    const cur = Math.max(0, g.orbit.numSatellites || (g.satellites?.length || 0));
+    const next = Math.min(cur + 1, 2000); // safety cap
+    rebuildMissionSatellites(g, next);
+  }
+
+  function removeOneSatFromMission(id) {
+    const g = missionStore.find(x => x && x.id === id);
+    if (!g || !g.orbit) return;
+
+    const cur = Math.max(0, g.orbit.numSatellites || (g.satellites?.length || 0));
+    const next = Math.max(1, cur - 1); // минимум 1 КА, чтобы орбита не стала "пустой"
+    rebuildMissionSatellites(g, next);
+  }
+
+  function renderMissionList() {
+    if (!missionListEl) return;
+
+    missionListEl.innerHTML = "";
+
+    if (!missionStore.length) {
+      const li = document.createElement("li");
+      li.style.opacity = "0.75";
+      li.textContent = "MIS-орбит нет — создайте в форме выше.";
+      missionListEl.appendChild(li);
+      return;
+    }
+
+    missionStore.forEach((g) => {
+      if (!g || !g.orbit) return;
+
+      const li = document.createElement("li");
+      li.style.marginBottom = "8px";
+
+      const count = g.orbit.numSatellites || (g.satellites ? g.satellites.length : 0);
+
+      li.innerHTML = `
+        <div style="display:flex; gap:8px; align-items:flex-start; justify-content:space-between;">
+          <div>
+            <div><b>${g.name}</b></div>
+            <div style="font-size:11px; opacity:.85;">
+              h=${formatKm(g.orbit.altitude)} км,
+              i=${formatDeg(g.orbit.inclination)}°,
+              КА=${count}
+            </div>
+          </div>
+
+          <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+            <button type="button" data-act="mis-add-sat" data-id="${g.id}">➕ КА</button>
+            <button type="button" data-act="mis-del-sat" data-id="${g.id}">➖ КА</button>
+            <button type="button" data-act="mis-del-orbit" data-id="${g.id}" style="background:#d9534f;">
+              🗑 Орбита
+            </button>
+          </div>
+        </div>
+      `;
+
+      missionListEl.appendChild(li);
+    });
+  }
+
+  // Делегирование кликов по списку
+  if (missionListEl) {
+    missionListEl.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+
+      const act = btn.dataset.act;
+      const id = parseInt(btn.dataset.id, 10);
+      if (!act || !isFinite(id)) return;
+
+      if (act === "mis-add-sat") addOneSatToMission(id);
+      else if (act === "mis-del-sat") removeOneSatFromMission(id);
+      else if (act === "mis-del-orbit") deleteMissionOrbitById(id);
+    });
+  }
+
+  // Кнопка "удалить всё"
+  if (deleteAllBtn) {
+    deleteAllBtn.addEventListener("click", () => {
+      deleteAllMissions();
+      emitTopologyChanged();
+      renderMissionList();
+    });
+  }
 
   // UI элементы
   const form = document.getElementById("mission-form");
@@ -401,6 +550,8 @@
       numSatellites,
       participatesInMesh
     });
+    renderMissionList();
+    emitTopologyChanged();
 
     console.log(`[mission] created orbit=${name}, h=${altitudeKm}km, i=${inclinationDeg}°, sats=${numSatellites}, mesh=${participatesInMesh}`);
   });
@@ -411,6 +562,7 @@
       console.log("[mission] all missions deleted");
     });
   }
+  renderMissionList();
 
   // Экспорт полезных функций
   sm.mission = sm.mission || {};
