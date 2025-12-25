@@ -150,8 +150,9 @@ window.spaceMesh.radio.onTopologyChanged = onTopologyChanged;
   // Собрать все сущности спутников из orbitStore
 function collectAllSatellites(time) {
   const sats = [];
+  const meshIdSet = new Set(); // <— IDs только mesh-КА (из orbitStore)
 
-  // --- КА связи ---
+  // --- КА связи (mesh) ---
   orbitStoreRef.forEach((group) => {
     if (!group || !Array.isArray(group.satellites)) return;
 
@@ -163,33 +164,37 @@ function collectAllSatellites(time) {
         sat.entity?.position?.getValue ? sat.entity :
         null;
 
-      if (ent) sats.push(ent);
+      if (!ent || !ent.position?.getValue) continue;
+
+      sats.push(ent);
+      meshIdSet.add(ent.id);
     }
   });
 
-  // --- КА заданий (если есть) ---
-  if (Array.isArray(missionStoreRef)) {
-    missionStoreRef.forEach((group) => {
+  // --- КА заданий (MIS) ---
+  const ms = window.spaceMesh?.missionStore;
+  if (Array.isArray(ms)) {
+    ms.forEach((group) => {
       if (!group || !Array.isArray(group.satellites)) return;
 
       for (const sat of group.satellites) {
         const ent = sat.entity || sat;
         if (!ent || !ent.position?.getValue) continue;
 
-        // КЛЮЧЕВОЙ ФИЛЬТР
         const state =
           ent.properties?.state?.getValue?.(time) ??
           ent.properties?.state?.getValue?.() ??
           ent.properties?.state;
 
         const isBusy = String(state || "IDLE").toUpperCase() !== "IDLE";
+        if (isBusy) continue; // занятые MIS не участвуют
 
-        if (!isBusy) sats.push(ent);
+        sats.push(ent);
       }
     });
   }
 
-  return sats;
+  return { sats, meshIdSet };
 }
 
   // Средний орбитальный период (для энергетики на виток)
@@ -472,6 +477,21 @@ function collectAllSatellites(time) {
   function makeLinkKey(idA, idB) {
     return idA < idB ? `${idA}|${idB}` : `${idB}|${idA}`;
   }
+
+  function isMissionSat(ent, time) {
+  const v =
+    ent?.properties?.isMissionSatellite?.getValue?.(time) ??
+    ent?.properties?.isMissionSatellite;
+  return v === true;
+}
+
+function participatesInMesh(ent, time) {
+  const v =
+    ent?.properties?.participatesInMesh?.getValue?.(time) ??
+    ent?.properties?.participatesInMesh;
+  // по умолчанию: обычные mesh-КА считаем участниками
+  return v === undefined ? true : (v === true);
+}
 
   // --- 9. DOM: элементы правой панели ---
 
@@ -1245,7 +1265,7 @@ function applyPhasedProfileToConfig(profileKey) {
     }
     radioState.lastUpdateSeconds = seconds;
 
-    const sats = collectAllSatellites(time);
+    const { sats, meshIdSet } = collectAllSatellites(time);
     const n = sats.length;
 
     if (n < 2) {
@@ -1287,6 +1307,22 @@ function applyPhasedProfileToConfig(profileKey) {
         const satB = sats[j];
         const posB = satB.position.getValue(time);
         if (!posB) continue;
+
+const aIsMis = isMissionSat(satA, time);
+const bIsMis = isMissionSat(satB, time);
+
+// 1) Запрещаем MIS ↔ MIS
+if (aIsMis && bIsMis) continue;
+
+// 2) MIS ↔ mesh only
+// если A — MIS, то B обязан быть mesh (т.е. его id есть в meshIdSet)
+if (aIsMis && !meshIdSet.has(satB.id)) continue;
+// если B — MIS, то A обязан быть mesh
+if (bIsMis && !meshIdSet.has(satA.id)) continue;
+
+// 3) MIS участвует только если participatesInMesh=true
+if (aIsMis && !participatesInMesh(satA, time)) continue;
+if (bIsMis && !participatesInMesh(satB, time)) continue;
 
         const evalRes = evaluateLink(posA, posB);
         if (!evalRes.linkUp) continue;
