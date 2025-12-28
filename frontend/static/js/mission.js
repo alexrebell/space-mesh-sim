@@ -231,16 +231,17 @@
     return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   }
 
-  function getMissionColorByIndex(i) {
-    const palette = [
-      Cesium.Color.GOLD,
-      Cesium.Color.YELLOW,
-      Cesium.Color.ORANGE,
-      Cesium.Color.SALMON,
-      Cesium.Color.KHAKI
-    ];
-    return palette[i % palette.length];
-  }
+// --- Генерация уникальных цветов для MIS-орбит (HSL + золотое сечение) ---
+function getMissionColorByIndex(index) {
+  const goldenRatio = 0.618033988749895;
+  const hue = (index * goldenRatio) % 1.0;
+
+  // Чуть теплее/ярче, чтобы MIS-орбиты визуально отличались от обычных
+  const saturation = 0.80;
+  const lightness  = 0.58;
+
+  return Cesium.Color.fromHsl(hue, saturation, lightness, 1.0);
+}
 
   function createMissionSatelliteOnOrbit(orbit, color, satIndex, totalSatellites, participatesInMesh) {
     let deltaThetaRad;
@@ -276,7 +277,8 @@
       return Cesium.Cartesian3.fromElements(x, y, z, result);
     }, false);
 
-    const fillCss = "#ff004c"; // яркий неоново-красный
+    // const fillCss = "#ff004c"; // яркий неоново-красный
+    const fillCss = cesiumColorToCss(color); // берём цвет миссионной орбиты
     const img = makeSquareDataUri(fillCss);
 
     const ent = viewer.entities.add({

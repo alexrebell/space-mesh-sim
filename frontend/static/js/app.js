@@ -391,16 +391,21 @@ function createSatelliteOnOrbit(orbit, color, satIndex, totalSatellites) {
   return satEntity;
 }
 
-// --- Цвета орбит ---
-function getColorByIndex(i) {
-  const palette = [
-    Cesium.Color.CYAN,
-    Cesium.Color.ORANGE,
-    Cesium.Color.LIME,
-    Cesium.Color.MAGENTA,
-    Cesium.Color.YELLOW
-  ];
-  return palette[i % palette.length];
+
+// --- Генерация уникальных цветов для орбит (HSL + золотое сечение) ---
+function getColorByIndex(index) {
+  // Золотое сечение для равномерного распределения оттенков
+  const goldenRatio = 0.618033988749895;
+
+  // Hue ∈ [0, 1)
+  const hue = (index * goldenRatio) % 1.0;
+
+  // Фиксируем насыщенность и яркость для читаемости
+  const saturation = 0.75; // 75%
+  const lightness = 0.5 + 0.1 * ((index % 3) - 1); // 0.4 / 0.5 / 0.6
+
+
+  return Cesium.Color.fromHsl(hue, saturation, lightness, 1.0);
 }
 
 function cesiumColorToCss(color) {
