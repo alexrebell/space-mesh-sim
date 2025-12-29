@@ -1297,7 +1297,14 @@ function applyPhasedProfileToConfig(profileKey) {
     const degrees = new Array(n).fill(0);
     const activeKeys = new Set();
 
-    // Перебор всех пар (i < j)
+    // Перебор всех пар (i < j) — сначала собираем кандидатов, затем строим топологию с приоритетом MIS
+    const MIS_RESERVE_PER_MESH = 1; // каждый mesh-КА может взять +1 "резервный" MIS-линк сверх maxNeighborsPerSat
+    const MIS_MAX_LINKS = 1;        // MIS-КА (в состоянии IDLE) держит максимум 1 линк (достаточно, чтобы "быть в сети")
+
+    // Кандидаты (оценка линков не зависит от порядка)
+    const candidatesMis = [];   // MIS ↔ mesh
+    const candidatesMesh = [];  // mesh ↔ mesh
+
     for (let i = 0; i < n; i++) {
       const satA = sats[i];
       const posA = satA.position.getValue(time);
@@ -1308,69 +1315,136 @@ function applyPhasedProfileToConfig(profileKey) {
         const posB = satB.position.getValue(time);
         if (!posB) continue;
 
-const aIsMis = isMissionSat(satA, time);
-const bIsMis = isMissionSat(satB, time);
+        const aIsMis = isMissionSat(satA, time);
+        const bIsMis = isMissionSat(satB, time);
 
-// 1) Запрещаем MIS ↔ MIS
-if (aIsMis && bIsMis) continue;
+        // 1) Запрещаем MIS ↔ MIS
+        if (aIsMis && bIsMis) continue;
 
-// 2) MIS ↔ mesh only
-// если A — MIS, то B обязан быть mesh (т.е. его id есть в meshIdSet)
-if (aIsMis && !meshIdSet.has(satB.id)) continue;
-// если B — MIS, то A обязан быть mesh
-if (bIsMis && !meshIdSet.has(satA.id)) continue;
+        // 2) MIS ↔ mesh only (mesh = только те, кто пришёл из orbitStore)
+        if (aIsMis && !meshIdSet.has(satB.id)) continue;
+        if (bIsMis && !meshIdSet.has(satA.id)) continue;
 
-// 3) MIS участвует только если participatesInMesh=true
-if (aIsMis && !participatesInMesh(satA, time)) continue;
-if (bIsMis && !participatesInMesh(satB, time)) continue;
+        // 3) MIS участвует только если participatesInMesh=true
+        if (aIsMis && !participatesInMesh(satA, time)) continue;
+        if (bIsMis && !participatesInMesh(satB, time)) continue;
 
         const evalRes = evaluateLink(posA, posB);
         if (!evalRes.linkUp) continue;
 
-        // Ограничение на число соседей на КА (mesh-параметр)
-        if (maxNeigh > 0) {
-          if (degrees[i] >= maxNeigh || degrees[j] >= maxNeigh) {
-            continue;
-          }
-        }
-
         const key = makeLinkKey(satA.id, satB.id);
-        activeKeys.add(key);
 
-        linksCount++;
-        degrees[i]++;
-        degrees[j]++;
+        // Score: выше SNR и ниже расстояние — лучше
+        const snr = isFinite(evalRes.snrDb) ? evalRes.snrDb : -9999;
+        const dist = isFinite(evalRes.distanceKm) ? evalRes.distanceKm : 1e12;
+        const score = snr * 1000 - dist;
 
-        if (isFinite(evalRes.snrDb)) {
-          snrMin = Math.min(snrMin, evalRes.snrDb);
-          snrMax = Math.max(snrMax, evalRes.snrDb);
-          snrSum += evalRes.snrDb;
-          snrSamples++;
+        const edge = { i, j, satA, satB, key, evalRes, score, aIsMis, bIsMis };
 
-          const capMbps = computeCapacityMbps(cfg, evalRes.snrDb);
-          if (isFinite(capMbps)) {
-            capacitySumMbps += capMbps;
-          }
-        }
+        if (aIsMis || bIsMis) candidatesMis.push(edge);
+        else candidatesMesh.push(edge);
+      }
+    }
 
-        if (isFinite(evalRes.distanceKm)) {
-          distSumKm += evalRes.distanceKm;
-          distSamples++;
-        }
+    // --- Аллокация линков с приоритетом MIS ---
 
-        if (radioState.drawLinks) {
-          let ent = radioState.linksByKey.get(key);
-          if (!ent) {
-            ent = createRadioLinkEntity(satA, satB, evalRes.snrDb);
-            radioState.linksByKey.set(key, ent);
-          } else {
-            updateRadioLinkVisual(ent, evalRes.snrDb);
-          }
+    const misDegree = new Array(n).fill(0);          // степень только для MIS-КА
+    const meshMisReserveUsed = new Array(n).fill(0); // сколько "резервных" MIS-линков уже взял mesh-КА
+
+    function activateEdge(edge) {
+      const { i, j, satA, satB, key, evalRes, aIsMis, bIsMis } = edge;
+
+      if (activeKeys.has(key)) return;
+      activeKeys.add(key);
+
+      linksCount++;
+      degrees[i]++;
+      degrees[j]++;
+
+      if (aIsMis) misDegree[i]++;
+      if (bIsMis) misDegree[j]++;
+
+      if (isFinite(evalRes.snrDb)) {
+        snrMin = Math.min(snrMin, evalRes.snrDb);
+        snrMax = Math.max(snrMax, evalRes.snrDb);
+        snrSum += evalRes.snrDb;
+        snrSamples++;
+
+        const capMbps = computeCapacityMbps(cfg, evalRes.snrDb);
+        if (isFinite(capMbps)) capacitySumMbps += capMbps;
+      }
+
+      if (isFinite(evalRes.distanceKm)) {
+        distSumKm += evalRes.distanceKm;
+        distSamples++;
+      }
+
+      if (radioState.drawLinks) {
+        let ent = radioState.linksByKey.get(key);
+        if (!ent) {
+          ent = createRadioLinkEntity(satA, satB, evalRes.snrDb);
+          radioState.linksByKey.set(key, ent);
+        } else {
+          updateRadioLinkVisual(ent, evalRes.snrDb);
         }
       }
     }
 
-    // Чистим "мертвые" линки (если отображение включено)
+    // 1) Сначала: гарантируем, что каждый IDLE MIS получит хотя бы 1 лучший линк к mesh,
+    //    даже если mesh уже "заполнен" — за счёт MIS_RESERVE_PER_MESH.
+    const byMisIndex = new Map(); // misIndex -> edges[]
+    for (const e of candidatesMis) {
+      const misIdx = e.aIsMis ? e.i : e.j;
+      if (!byMisIndex.has(misIdx)) byMisIndex.set(misIdx, []);
+      byMisIndex.get(misIdx).push(e);
+    }
+
+    for (const [misIdx, list] of byMisIndex.entries()) {
+      // лучшие варианты для данного MIS
+      list.sort((a, b) => b.score - a.score);
+
+      for (const e of list) {
+        if (misDegree[misIdx] >= MIS_MAX_LINKS) break;
+
+        const meshIdx = e.aIsMis ? e.j : e.i;
+
+        if (maxNeigh > 0) {
+          const withinBase = degrees[meshIdx] < maxNeigh;
+          const canUseReserve =
+            MIS_RESERVE_PER_MESH > 0 &&
+            meshMisReserveUsed[meshIdx] < MIS_RESERVE_PER_MESH &&
+            degrees[meshIdx] < (maxNeigh + MIS_RESERVE_PER_MESH);
+
+          if (!withinBase && !canUseReserve) continue;
+
+          // если пришлось зайти "сверх" базового лимита — считаем это резервом под MIS
+          if (!withinBase && canUseReserve) {
+            meshMisReserveUsed[meshIdx] += 1;
+          }
+        }
+
+        activateEdge(e);
+        break; // MIS получил линк — достаточно
+      }
+    }
+
+    // 2) Затем: строим mesh↔mesh как обычно, но НЕ позволяем занимать MIS-резерв
+    //    (т.е. степени для mesh↔mesh ограничиваются строго maxNeigh).
+    candidatesMesh.sort((a, b) => b.score - a.score);
+
+    for (const e of candidatesMesh) {
+      const i = e.i;
+      const j = e.j;
+
+      if (maxNeigh > 0) {
+        // ВАЖНО: mesh↔mesh не может превышать базовый лимит (резерв для MIS не тратим)
+        if (degrees[i] >= maxNeigh || degrees[j] >= maxNeigh) continue;
+      }
+
+      activateEdge(e);
+    }
+
+// Чистим "мертвые" линки (если отображение включено) (если отображение включено)
     if (radioState.drawLinks) {
       for (const [key, ent] of radioState.linksByKey.entries()) {
         if (!activeKeys.has(key)) {
