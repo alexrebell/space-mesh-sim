@@ -977,14 +977,89 @@ viewer.scene.camera.setView({
   destination: Cesium.Cartesian3.fromDegrees(0, 20, 20000000.0)
 });
 
-// --- 7. Экспорт базовых объектов в глобальный namespace для radio.js ---
-window.spaceMesh = {
+// --- 7. Экспорт базовых объектов в глобальный namespace для других модулей ---
+// ВАЖНО: не перетираем window.spaceMesh целиком, чтобы не ломать утилиты/расширения (geo_utils.js, radio.js и т.д.)
+window.spaceMesh = window.spaceMesh || {};
+Object.assign(window.spaceMesh, {
   viewer,
   clock,
   orbitStore,
   EARTH_RADIUS,
   start
-};
+});
+
+// --- 7a. ДИНАМИЧЕСКАЯ геопозиция КА в InfoBox (lat/lon/alt WGS-84) ---
+// Важно:
+// 1) сохраняем базовое описание один раз (без regex),
+// 2) description становится CallbackProperty и обновляется каждый tick,
+// 3) не ломаем исходные поля и не "съедаем" HTML.
+
+(function attachDynamicGeoToSelectedEntity(viewer) {
+  if (!viewer || !viewer.selectedEntityChanged) return;
+
+  function computeGeo(pos) {
+    // Используем общую утилиту, если подключена (geo_utils.js)
+    if (window.spaceMesh && typeof window.spaceMesh.ecefToGeo === "function") {
+      return window.spaceMesh.ecefToGeo(pos);
+    }
+    // fallback
+    const c = Cesium.Cartographic.fromCartesian(pos);
+    return {
+      lat: Cesium.Math.toDegrees(c.latitude),
+      lon: Cesium.Math.toDegrees(c.longitude),
+      h_m: c.height
+    };
+  }
+
+  viewer.selectedEntityChanged.addEventListener(function (entity) {
+    if (!entity || !entity.position) return;
+
+    // 1) Забираем текущее описание как базовое ОДИН раз.
+    //    Важно: если это уже наш CallbackProperty — не перезатираем базу.
+    if (!entity._spaceMeshBaseDescriptionHtml) {
+      const t = viewer.clock.currentTime;
+
+      let base = "";
+      try {
+        // Если description — Property (ConstantProperty и т.п.)
+        if (entity.description && typeof entity.description.getValue === "function") {
+          base = entity.description.getValue(t) || "";
+        } else if (typeof entity.description === "string") {
+          base = entity.description;
+        }
+      } catch (e) {
+        base = "";
+      }
+
+      // На случай если там уже был наш старый блок — просто сохраняем как есть.
+      entity._spaceMeshBaseDescriptionHtml = base;
+    }
+
+    // 2) Делаем динамическое description
+    entity.description = new Cesium.CallbackProperty(function (time) {
+      const pos = entity.position.getValue(time);
+      if (!pos) return entity._spaceMeshBaseDescriptionHtml || "<i>Нет данных о позиции</i>";
+
+      const geo = computeGeo(pos);
+
+      const lat = (geo.lat ?? 0).toFixed(4);
+      const lon = (geo.lon ?? 0).toFixed(4);
+      const altKm = ((geo.h_m ?? 0) / 1000).toFixed(2);
+
+      const extra =
+        `<hr/>` +
+        `<div style="font-size:12px;">` +
+        `<b>Геопозиция (WGS-84):</b><br/>` +
+        `Широта: <b>${lat}°</b><br/>` +
+        `Долгота: <b>${lon}°</b><br/>` +
+        `Высота: <b>${altKm} км</b>` +
+        `</div>`;
+
+      return (entity._spaceMeshBaseDescriptionHtml || "") + extra;
+    }, false);
+  });
+})(viewer);
+
 
 const bulkDeleteAllBtn = document.getElementById("bulk-delete-all");
 if (bulkDeleteAllBtn) {

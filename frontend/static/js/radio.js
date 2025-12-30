@@ -106,8 +106,12 @@
       refDistanceKm: 1000         // эталонная дальность для single-link summary
     },
 
-    // key "satIdA|satIdB" -> Cesium.Entity полилинии
-    linksByKey: new Map()
+    // key "satIdA|satIdB" -> Cesium.Entity полилинии (только визуализация)
+    linksByKey: new Map(),
+
+    // key "satIdA|satIdB" -> { aId,bId,distanceKm,rxPowerDbm,snrDb,noiseFloorDbm,capacityMbps,isMisEdge }
+    // Храним независимо от drawLinks, чтобы внешние модули (tasking.js) могли строить маршруты
+    activeEdgesByKey: new Map()
   };
 
   // --- expose minimal public API for other modules (ground stations etc.) ---
@@ -143,6 +147,19 @@ window.spaceMesh.radio.computeBudgetForDistanceMeters = (distanceMeters) => {
 
   return { fsplDb, rxPowerDbm, snrDb, noiseFloorDbm };
 };
+
+// Оценка пропускной способности (Мбит/с) по текущей модели MCS/полосы
+window.spaceMesh.radio.computeCapacityMbps = (snrDb) => {
+  return computeCapacityMbps(radioState.config, snrDb);
+};
+
+// Снимок текущих активных линков (ребёр графа) радиосети.
+// ВАЖНО: возвращает только sat↔sat (mesh↔mesh и MIS↔mesh) ребра.
+window.spaceMesh.radio.getActiveEdgesSnapshot = () => {
+  return Array.from(radioState.activeEdgesByKey.values());
+};
+
+// Для подписки: событие "spaceMesh:radioTick" диспатчится после каждого пересчёта топологии.
 window.spaceMesh.radio.onTopologyChanged = onTopologyChanged;
 
   // --- 3. Вспомогательные функции по орбитам и спутникам ---
@@ -571,12 +588,13 @@ function participatesInMesh(ent, time) {
         clearRadioLinks();
         updateRadioMeshInfo("Радиомоделирование выключено.");
       } else {
-        updateRadioMeshInfo(
-          "<b>Активных линков:</b> 0<br/>" +
-          "<b>КА в сети:</b> 0<br/>" +
-          "<b>SNR, dB:</b> -<br/>" +
-          "<small>Ожидание расчёта mesh-сети.</small>"
-        );
+updateRadioMeshInfo(`
+  <b>Активных линков:</b> 0<br/>
+  <b>КА в сети (mesh):</b> 0<br/>
+  <b>КА в сети (задания/MIS):</b> 0<br/>
+  <b>SNR, dB:</b> -<br/>
+  <small>Ожидание расчёта mesh-сети.</small>
+`);
       }
     });
   }
@@ -1297,6 +1315,9 @@ function applyPhasedProfileToConfig(profileKey) {
     const degrees = new Array(n).fill(0);
     const activeKeys = new Set();
 
+    // Снимок активных рёбер для внешних модулей
+    radioState.activeEdgesByKey.clear();
+
     // Перебор всех пар (i < j) — сначала собираем кандидатов, затем строим топологию с приоритетом MIS
     const MIS_RESERVE_PER_MESH = 1; // каждый mesh-КА может взять +1 "резервный" MIS-линк сверх maxNeighborsPerSat
     const MIS_MAX_LINKS = 1;        // MIS-КА (в состоянии IDLE) держит максимум 1 линк (достаточно, чтобы "быть в сети")
@@ -1364,15 +1385,29 @@ function applyPhasedProfileToConfig(profileKey) {
       if (aIsMis) misDegree[i]++;
       if (bIsMis) misDegree[j]++;
 
+      let capMbps = NaN;
       if (isFinite(evalRes.snrDb)) {
         snrMin = Math.min(snrMin, evalRes.snrDb);
         snrMax = Math.max(snrMax, evalRes.snrDb);
         snrSum += evalRes.snrDb;
         snrSamples++;
 
-        const capMbps = computeCapacityMbps(cfg, evalRes.snrDb);
+        capMbps = computeCapacityMbps(cfg, evalRes.snrDb);
         if (isFinite(capMbps)) capacitySumMbps += capMbps;
       }
+
+      // сохраняем ребро в снимок (для маршрутизации)
+      radioState.activeEdgesByKey.set(key, {
+        key,
+        aId: satA.id,
+        bId: satB.id,
+        distanceKm: evalRes.distanceKm,
+        rxPowerDbm: evalRes.rxPowerDbm,
+        snrDb: evalRes.snrDb,
+        noiseFloorDbm: evalRes.noiseFloorDbm,
+        capacityMbps: capMbps,
+        isMisEdge: !!(aIsMis || bIsMis)
+      });
 
       if (isFinite(evalRes.distanceKm)) {
         distSumKm += evalRes.distanceKm;
@@ -1464,6 +1499,25 @@ function applyPhasedProfileToConfig(profileKey) {
       if (degrees[i] > 0) activeSatCount++;
     }
 
+    // Разделение: mesh-КА и КА заданий (MIS, только IDLE участвуют)
+    let totalMeshSatCount = 0;
+    let totalMisSatCount = 0;
+    let activeMeshSatCount = 0;
+    let activeMisSatCount = 0;
+
+    for (let i = 0; i < n; i++) {
+      const ent = sats[i];
+      const isMis = isMissionSat(ent, time) === true;
+
+      if (isMis) totalMisSatCount++;
+      else totalMeshSatCount++;
+
+      if (degrees[i] > 0) {
+        if (isMis) activeMisSatCount++;
+        else activeMeshSatCount++;
+      }
+    }
+
     const avgDegree =
       activeSatCount > 0 ? (2 * linksCount) / activeSatCount : 0;
 
@@ -1477,7 +1531,8 @@ function applyPhasedProfileToConfig(profileKey) {
 
     updateRadioMeshInfo(
       `<b>Активных линков:</b> ${linksCount}<br/>
-       <b>КА в сети:</b> ${activeSatCount} из ${n}<br/>
+       <b>КА в сети (mesh):</b> ${activeMeshSatCount} из ${totalMeshSatCount}<br/>
+       <b>КА в сети (задания/MIS):</b> ${activeMisSatCount} из ${totalMisSatCount}<br/>
        <b>Средняя степень узла k:</b> ≈ ${avgDegree.toFixed(2)}<br/>
        <b>Средняя дальность линка:</b> ≈ ${isFinite(avgDistKm) ? avgDistKm.toFixed(1) : "-"} км<br/>
        <b>Оценочная суммарная пропускная способность сети:</b> ≈ ${isFinite(capacitySumMbps) ? capacitySumMbps.toFixed(1) : "-"} Мбит/с<br/>
@@ -1489,6 +1544,17 @@ function applyPhasedProfileToConfig(profileKey) {
 
     // Обновляем single-link summary и энергетику с учётом новой средней дальности
     updateSingleLinkAndEnergySummary();
+
+    // Уведомление внешних модулей (tasking.js) о том, что топология обновилась.
+    try {
+      window.dispatchEvent(new CustomEvent("spaceMesh:radioTick", {
+        detail: {
+          time,
+          links: linksCount,
+          activeEdges: radioState.activeEdgesByKey.size
+        }
+      }));
+    } catch {}
   });
   // --- 13. Реакция на изменение топологии (орбиты/КА пересозданы/удалены) ---
   window.addEventListener("spaceMesh:topologyChanged", onTopologyChanged);

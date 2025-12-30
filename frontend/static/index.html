@@ -21,6 +21,7 @@
 <div id="top-left-buttons" class="top-left-buttons">
   <div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
   <div id="mission-toggle" class="orbit-toggle-btn">▼ КА заданий</div>
+  <div id="tasking-toggle" class="orbit-toggle-btn">▼ Задания</div>
 </div>
 
   <!-- Панель управления -->
@@ -64,6 +65,100 @@
         </button>
     </div>
 </div>
+
+
+<!-- Левая панель: Задания на съёмку -->
+<div id="tasking-panel" class="overlay-panel hidden">
+  <h1>Задания на съёмку</h1>
+
+  <h2 style="margin:8px 0 6px;">Отправитель</h2>
+  <label>
+    Режим наземной станции:
+    <select id="tasking-gs-mode">
+      <option value="auto" selected>Автоматически (лучшие условия)</option>
+      <option value="manual">Выбрать вручную</option>
+    </select>
+  </label>
+
+  <div id="tasking-gs-row" style="margin-top:6px;">
+    <label>
+      Наземная станция:
+      <select id="tasking-gs-select"></select>
+    </label>
+    <button id="tasking-refresh-gs" type="button" style="margin-top:6px;">↻ Обновить список станций</button>
+  </div>
+
+  <h2 style="margin:10px 0 6px;">Целевая область (координаты)</h2>
+  <div class="row">
+    <label style="width:100%;">
+      Lon min:
+      <input id="tasking-lon-min" type="number" step="0.001" value="37.500" />
+    </label>
+    <label style="width:100%;">
+      Lon max:
+      <input id="tasking-lon-max" type="number" step="0.001" value="37.900" />
+    </label>
+  </div>
+  <div class="row">
+    <label style="width:100%;">
+      Lat min:
+      <input id="tasking-lat-min" type="number" step="0.001" value="55.600" />
+    </label>
+    <label style="width:100%;">
+      Lat max:
+      <input id="tasking-lat-max" type="number" step="0.001" value="55.900" />
+    </label>
+  </div>
+
+  <button id="tasking-apply-rect" type="button" style="margin-top:6px;">Применить область</button>
+  <button id="tasking-clear-rect" type="button" style="margin-top:6px; background:#666;">Очистить область</button>
+
+  <div class="hint" style="margin-top:8px;">
+    <div><b>Статус области:</b> <span id="tasking-target-status">—</span></div>
+  </div>
+
+  <h2 style="margin:10px 0 6px;">Исполнитель (MIS-КА)</h2>
+  <button id="tasking-pick-mis" type="button">Подобрать исполнителя (15 минут)</button>
+  <div class="hint" style="margin-top:8px;">
+    <div><b>Выбран:</b> <span id="tasking-mis-chosen">—</span></div>
+    <div><b>ETA до области:</b> <span id="tasking-mis-eta">—</span></div>
+  </div>
+
+  <h2 style="margin:10px 0 6px;">Таймлайн (бюджеты)</h2>
+  <div class="row">
+    <label style="width:100%;">Uplink, c:
+      <input id="tasking-uplink-sec" type="number" value="120" min="10" max="600" />
+    </label>
+    <label style="width:100%;">Downlink, c:
+      <input id="tasking-downlink-sec" type="number" value="360" min="10" max="900" />
+    </label>
+  </div>
+  <div class="row">
+    <label style="width:100%;">Выполнение min, c:
+      <input id="tasking-exec-min" type="number" value="300" min="30" max="900" />
+    </label>
+    <label style="width:100%;">Выполнение max, c:
+      <input id="tasking-exec-max" type="number" value="420" min="30" max="900" />
+    </label>
+  </div>
+
+  <button id="tasking-send" type="button" style="margin-top:8px; background:#28a745;">Отправить задание</button>
+
+  <div class="hint" style="margin-top:10px;">
+    <div><b>Состояние:</b> <span id="tasking-status">—</span></div>
+    <div><b>Этап:</b> <span id="tasking-stage">—</span></div>
+    <div><b>Осталось (этап):</b> <span id="tasking-remaining">—</span></div>
+    <div><b>Осталось (всего):</b> <span id="tasking-total-remaining">—</span></div>
+    <div style="margin-top:6px; opacity:.8;">
+      Бюджеты: uplink <b id="tasking-uplink">—</b>, выполнение <b id="tasking-exec">—</b>, downlink <b id="tasking-downlink">—</b>
+    </div>
+  </div>
+
+  <div class="hint" style="margin-top:10px;">
+    Маршруты uplink/downlink и граф связанности добавим следующим шагом (на базе текущих активных линков radio.js).
+  </div>
+</div>
+
 
   <div id="orbit-panel" class="overlay-panel">
       <h1>Орбиты и КА</h1>
@@ -566,5 +661,7 @@
   <script src="/static/js/ground_stations.js"></script>
   <script src="/static/js/mission.js"></script>
   <script src="/static/js/radio.js"></script>
+  <script src="/static/js/geo_utils.js"></script>
+  <script src="/static/js/tasking.js"></script>
 </body>
 </html>

@@ -459,3 +459,15 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   cursor: move;
   user-select: none;
 }
+
+/* Панель "Задания" — как "Орбиты и КА" */
+#tasking-panel {
+  top: 45px;          /* как у #orbit-panel */
+  left: 10px;
+  width: 400px;       /* как у #orbit-panel */
+  max-height: 75vh;   /* как у #orbit-panel */
+  overflow-y: auto;
+
+  right: auto;        /* чтобы draggable не тянуло вправо */
+  bottom: auto;
+}
