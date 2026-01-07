@@ -1,5 +1,4 @@
 // static/js/radio.js
-// Расширенная модель радиосети: MCS, антенны, потери, шум, энергетика КА, метрики mesh.
 
 (function () {
   if (typeof Cesium === "undefined") {
@@ -13,13 +12,11 @@
   let orbitStoreRef = null;
   let EARTH_RADIUS = null;
   let startTime = null;
-  let missionStoreRef = null;
 
   if (window.spaceMesh) {
     viewer = window.spaceMesh.viewer;
     clock = window.spaceMesh.clock;
     orbitStoreRef = window.spaceMesh.orbitStore;
-    missionStoreRef = window.spaceMesh.missionStore || [];
     EARTH_RADIUS = window.spaceMesh.EARTH_RADIUS;
     startTime = window.spaceMesh.start;
   } else if (
@@ -42,12 +39,11 @@
 
   // --- 2. Состояние радиосети и конфиг канала ---
   const radioState = {
-    enabled: false,        // включено ли моделирование
-    drawLinks: true,       // рисовать ли линии
+    enabled: false,
+    drawLinks: true,
     lastUpdateSeconds: 0,
-    updatePeriodSec: 1.0,  // период пересчёта сети, с
+    updatePeriodSec: 1.0,
 
-    // Запоминаем последнюю среднюю дальность линка (для single-link summary)
     lastAvgLinkDistKm: 0,
 
     config: {
@@ -57,9 +53,9 @@
       gainTxDb: 10,
       gainRxDb: 10,
       rxSensDbm: -100,
-      noiseFloorDbm: -110, // используется как fallback, если не считаем из T_sys
+      noiseFloorDbm: -110, // fallback
       minSnrDb: 5,
-      maxRangeKm: 0, // 0 = без ограничения по дальности
+      maxRangeKm: 0, // 0 = без ограничения
 
       // 1.1. Модуляция и кодирование (MCS)
       modulation: "QPSK",
@@ -70,9 +66,9 @@
       // 1.2. Антенны / направленность и потери
       antennaType: "directional", // directional|sector|phased|omni|custom
 
-      beamWidthDeg: 20,       // для направленной/секторной/ФАР (основной лепесток)
-      pointingLossDb: 1.0,    // потери наведения
-      polLossDb: 0.5,         // потери поляризации
+      beamWidthDeg: 20,
+      pointingLossDb: 1.0,
+      polLossDb: 0.5,
 
       // Параметры ФАР
       phasedMaxScanDeg: 45,
@@ -97,124 +93,143 @@
       noiseBandwidthMHz: 20,
 
       // 1.5. Mesh-специфика
-      maxNeighborsPerSat: 0,      // 0 = без ограничения
-      routingMetric: "snr",       // пока для будущих расширений
+      maxNeighborsPerSat: 0, // 0 = без ограничения
+      routingMetric: "snr",
 
       // 1.6. Энергетика КА
       txElecPowerW: 60,
-      dutyCycle: 0.2,             // доля времени (0…1)
-      refDistanceKm: 1000         // эталонная дальность для single-link summary
+      dutyCycle: 0.2,
+      refDistanceKm: 1000,
+
+      // --- NEW: unified mesh behavior ---
+      allowMisToMis: false,  //  MIS не может связываться с MIS (как полноценный mesh-участник)
+      stickyBonus: 750,      // бонус к score для ребра, которое было активно на прошлом тике (уменьшает "флаппинг")
+      misMaxLinks: 3 // каждого MIS вводим лимит: макс. 3 активных линка, выбираем самые оптимальные (по score = SNR*1000 − dist + sticky).
     },
 
-    // key "satIdA|satIdB" -> Cesium.Entity полилинии (только визуализация)
     linksByKey: new Map(),
 
-    // key "satIdA|satIdB" -> { aId,bId,distanceKm,rxPowerDbm,snrDb,noiseFloorDbm,capacityMbps,isMisEdge }
-    // Храним независимо от drawLinks, чтобы внешние модули (tasking.js) могли строить маршруты
-    activeEdgesByKey: new Map()
+    // key -> { key,aId,bId,distanceKm,rxPowerDbm,snrDb,noiseFloorDbm,capacityMbps,isMisEdge,score }
+    activeEdgesByKey: new Map(),
+    prevActiveEdgesByKey: new Map()
   };
 
-  // --- expose minimal public API for other modules (ground stations etc.) ---
-window.spaceMesh = window.spaceMesh || {};
-window.spaceMesh.radio = window.spaceMesh.radio || {};
+  // --- expose minimal public API for other modules ---
+  window.spaceMesh = window.spaceMesh || {};
+  window.spaceMesh.radio = window.spaceMesh.radio || {};
 
-window.spaceMesh.radio.getConfig = () => radioState.config;
+  window.spaceMesh.radio.getConfig = () => radioState.config;
 
-// Возвращает линк-бюджет для "просто расстояния" (без LoS), по текущему профилю radio.js
-window.spaceMesh.radio.computeBudgetForDistanceMeters = (distanceMeters) => {
-  const cfg = radioState.config;
+  window.spaceMesh.radio.computeBudgetForDistanceMeters = (distanceMeters) => {
+    const cfg = radioState.config;
 
-  // FSPL
-  const fsplDb = computeFsplDb(distanceMeters, cfg.freqMHz);
+    const fsplDb = computeFsplDb(distanceMeters, cfg.freqMHz);
+    const { effGainTxDb, effGainRxDb, extraLossDb } = getEffectiveAntennaGains(cfg);
 
-  // Усиления/потери как в radio.js
-  const { effGainTxDb, effGainRxDb, extraLossDb } = getEffectiveAntennaGains(cfg);
+    const totalTxGainDb = effGainTxDb - cfg.txFeederLossDb - cfg.pointingLossDb;
+    const totalRxGainDb = effGainRxDb - cfg.rxFeederLossDb - cfg.pointingLossDb - cfg.polLossDb;
 
-  const totalTxGainDb = effGainTxDb - cfg.txFeederLossDb - cfg.pointingLossDb;
-  const totalRxGainDb = effGainRxDb - cfg.rxFeederLossDb - cfg.pointingLossDb - cfg.polLossDb;
+    const noiseFloorDbm = computeNoiseFloorFromTemp(cfg);
 
-  const noiseFloorDbm = computeNoiseFloorFromTemp(cfg);
+    const rxPowerDbm =
+      cfg.txPowerDbm +
+      totalTxGainDb +
+      totalRxGainDb -
+      fsplDb -
+      cfg.implLossDb -
+      extraLossDb;
 
-  const rxPowerDbm =
-    cfg.txPowerDbm +
-    totalTxGainDb +
-    totalRxGainDb -
-    fsplDb -
-    cfg.implLossDb -
-    extraLossDb;
+    const snrDb = rxPowerDbm - noiseFloorDbm;
 
-  const snrDb = rxPowerDbm - noiseFloorDbm;
+    return { fsplDb, rxPowerDbm, snrDb, noiseFloorDbm };
+  };
 
-  return { fsplDb, rxPowerDbm, snrDb, noiseFloorDbm };
-};
+  window.spaceMesh.radio.computeCapacityMbps = (snrDb) => {
+    return computeCapacityMbps(radioState.config, snrDb);
+  };
 
-// Оценка пропускной способности (Мбит/с) по текущей модели MCS/полосы
-window.spaceMesh.radio.computeCapacityMbps = (snrDb) => {
-  return computeCapacityMbps(radioState.config, snrDb);
-};
+  window.spaceMesh.radio.getActiveEdgesSnapshot = () => {
+    return Array.from(radioState.activeEdgesByKey.values());
+  };
 
-// Снимок текущих активных линков (ребёр графа) радиосети.
-// ВАЖНО: возвращает только sat↔sat (mesh↔mesh и MIS↔mesh) ребра.
-window.spaceMesh.radio.getActiveEdgesSnapshot = () => {
-  return Array.from(radioState.activeEdgesByKey.values());
-};
+  window.spaceMesh.radio.onTopologyChanged = onTopologyChanged;
 
-// Для подписки: событие "spaceMesh:radioTick" диспатчится после каждого пересчёта топологии.
-window.spaceMesh.radio.onTopologyChanged = onTopologyChanged;
+  // --- 3. Вспомогательные функции по спутникам ---
 
-  // --- 3. Вспомогательные функции по орбитам и спутникам ---
+  function isMissionSat(ent, time) {
+    const v =
+      ent?.properties?.isMissionSatellite?.getValue?.(time) ??
+      ent?.properties?.isMissionSatellite;
+    return v === true;
+  }
 
-  // Собрать все сущности спутников из orbitStore
-function collectAllSatellites(time) {
-  const sats = [];
-  const meshIdSet = new Set(); // <— IDs только mesh-КА (из orbitStore)
+  function participatesInMesh(ent, time) {
+    const v =
+      ent?.properties?.participatesInMesh?.getValue?.(time) ??
+      ent?.properties?.participatesInMesh;
+    return v === undefined ? true : (v === true);
+  }
 
-  // --- КА связи (mesh) ---
-  orbitStoreRef.forEach((group) => {
-    if (!group || !Array.isArray(group.satellites)) return;
+  function getMissionState(ent, time) {
+    const st =
+      ent?.properties?.state?.getValue?.(time) ??
+      ent?.properties?.state?.getValue?.() ??
+      ent?.properties?.state;
+    return String(st || "IDLE").toUpperCase();
+  }
 
-    for (const sat of group.satellites) {
-      if (!sat) continue;
+  // Собрать все сущности спутников:
+  // - КА связи: все из orbitStore
+  // - MIS-КА: из missionStore, но только если state=IDLE и participatesInMesh=true
+  function collectAllSatellites(time) {
+    const sats = [];
+    const satKindById = new Map(); // id -> "mesh" | "mis"
 
-      const ent =
-        sat.position?.getValue ? sat :
-        sat.entity?.position?.getValue ? sat.entity :
-        null;
-
-      if (!ent || !ent.position?.getValue) continue;
-
-      sats.push(ent);
-      meshIdSet.add(ent.id);
-    }
-  });
-
-  // --- КА заданий (MIS) ---
-  const ms = window.spaceMesh?.missionStore;
-  if (Array.isArray(ms)) {
-    ms.forEach((group) => {
+    // --- КА связи ---
+    orbitStoreRef.forEach((group) => {
       if (!group || !Array.isArray(group.satellites)) return;
 
       for (const sat of group.satellites) {
-        const ent = sat.entity || sat;
+        if (!sat) continue;
+
+        const ent =
+          sat.position?.getValue ? sat :
+          sat.entity?.position?.getValue ? sat.entity :
+          null;
+
         if (!ent || !ent.position?.getValue) continue;
 
-        const state =
-          ent.properties?.state?.getValue?.(time) ??
-          ent.properties?.state?.getValue?.() ??
-          ent.properties?.state;
-
-        const isBusy = String(state || "IDLE").toUpperCase() !== "IDLE";
-        if (isBusy) continue; // занятые MIS не участвуют
-
         sats.push(ent);
+        satKindById.set(ent.id, "mesh");
       }
     });
+
+    // --- MIS-КА ---
+    const ms = window.spaceMesh?.missionStore;
+    if (Array.isArray(ms)) {
+      ms.forEach((group) => {
+        if (!group || !Array.isArray(group.satellites)) return;
+
+        for (const sat of group.satellites) {
+          const ent = sat.entity || sat;
+          if (!ent || !ent.position?.getValue) continue;
+
+          // участвует ли в сети
+          if (!participatesInMesh(ent, time)) continue;
+
+          // занятые MIS не участвуют в mesh (как у тебя было)
+          const state = getMissionState(ent, time);
+          if (state !== "IDLE") continue;
+
+          sats.push(ent);
+          satKindById.set(ent.id, "mis");
+        }
+      });
+    }
+
+    return { sats, satKindById };
   }
 
-  return { sats, meshIdSet };
-}
-
-  // Средний орбитальный период (для энергетики на виток)
   function computeAverageOrbitPeriodSec() {
     let sum = 0;
     let count = 0;
@@ -226,10 +241,7 @@ function collectAllSatellites(time) {
       }
     });
 
-    if (count === 0) {
-      // Если орбит нет — возьмём типичные 95 мин
-      return 95 * 60;
-    }
+    if (count === 0) return 95 * 60;
     return sum / count;
   }
 
@@ -241,7 +253,6 @@ function collectAllSatellites(time) {
     return 32.44 + 20 * Math.log10(dKm) + 20 * Math.log10(freqMHz);
   }
 
-  // Проверка прямой видимости с учётом земного шара
   function hasLineOfSightRadio(posA, posB) {
     const R = EARTH_RADIUS;
 
@@ -262,19 +273,18 @@ function collectAllSatellites(time) {
     return distToCenter >= R;
   }
 
-  // Рассчитать эквивалентный Noise Floor из T_sys и B
   function computeNoiseFloorFromTemp(cfg) {
     const T = cfg.sysTempK;
     const B_Hz = cfg.noiseBandwidthMHz * 1e6;
     if (T <= 0 || B_Hz <= 0) return cfg.noiseFloorDbm;
 
-    const k = 1.38064852e-23; // Дж/К
+    const k = 1.38064852e-23;
     const N_watt = k * T * B_Hz;
     const N_dbm = 10 * Math.log10(N_watt / 1e-3);
     return N_dbm;
   }
 
-  // --- 5. MCS: требуемый Eb/N0 для выбранной модуляции и кодовой скорости ---
+  // --- 5. MCS: требуемый Eb/N0 ---
 
   function getRequiredEbNoDb(modulation, codingRate) {
     const r = codingRate || 0.5;
@@ -305,19 +315,11 @@ function collectAllSatellites(time) {
       if (r <= 0.66) return 14.0;
       return 16.0;
     }
-    return 5.0; // дефолт
+    return 5.0;
   }
 
-  // --- 6. Учёт типа антенны: эффективные усиления и дополнительные потери ---
+  // --- 6. Учёт типа антенны ---
 
-  /**
-   * Возвращает:
-   *  {
-   *    effGainTxDb,
-   *    effGainRxDb,
-   *    extraLossDb  // добавляем к implLossDb (например, для ФАР)
-   *  }
-   */
   function getEffectiveAntennaGains(cfg) {
     let effGainTxDb = cfg.gainTxDb;
     let effGainRxDb = cfg.gainRxDb;
@@ -327,43 +329,29 @@ function collectAllSatellites(time) {
 
     switch (type) {
       case "omni":
-        // Всенаправленная: используем omniGainDb вместо Gtx/Grx, потери наведения ≈ 0
         effGainTxDb = cfg.omniGainDb;
         effGainRxDb = cfg.omniGainDb;
         break;
 
       case "phased":
-        // ФАР: считаем, что можем лучше компенсировать наведение,
-        // но добавляем дополнительные потери на сканирование
-        // (реалистично было бы учитывать угол, но пока используем постоянную оценку).
         extraLossDb += cfg.phasedScanLossDb;
         break;
 
       case "custom":
-        // Пользовательская диаграмма: Gtx/Grx берём из customGainDb
         effGainTxDb = cfg.customGainDb;
         effGainRxDb = cfg.customGainDb;
         break;
 
       case "sector":
-        // Секторная: могли бы снижать усиление в зависимости от ширины сектора,
-        // но пока оставляем Gtx/Grx как есть (задаётся пользователем).
-        break;
-
       case "directional":
       default:
-        // По умолчанию — как есть.
         break;
     }
 
-    return {
-      effGainTxDb,
-      effGainRxDb,
-      extraLossDb
-    };
+    return { effGainTxDb, effGainRxDb, extraLossDb };
   }
 
-  // --- 7. Оценка линка между двумя КА (для mesh-расчёта) ---
+  // --- 7. Оценка линка между двумя КА ---
 
   function evaluateLink(posA, posB) {
     const cfg = radioState.config;
@@ -371,17 +359,14 @@ function collectAllSatellites(time) {
     const distanceMeters = Cesium.Cartesian3.distance(posA, posB);
     const distanceKm = distanceMeters / 1000.0;
 
-    // Ограничение по минимальной дистанции (анти-лаг при скучивании)
     if (cfg.minLinkDistanceEnabled && cfg.minLinkDistanceKm > 0 && distanceKm < cfg.minLinkDistanceKm) {
       return { linkUp: false, distanceKm, tooClose: true };
     }
 
-    // Ограничение по максимальной дальности
     if (cfg.maxRangeKm > 0 && distanceKm > cfg.maxRangeKm) {
       return { linkUp: false, distanceKm };
     }
 
-    // Прямая видимость
     const los = hasLineOfSightRadio(posA, posB);
     if (!los) {
       return { linkUp: false, distanceKm, los: false };
@@ -389,10 +374,8 @@ function collectAllSatellites(time) {
 
     const fsplDb = computeFsplDb(distanceMeters, cfg.freqMHz);
 
-    // Эффективные усиления с учётом типа антенны
     const { effGainTxDb, effGainRxDb, extraLossDb } = getEffectiveAntennaGains(cfg);
 
-    // Итоговые усиления с учётом потерь
     const totalTxGainDb =
       effGainTxDb - cfg.txFeederLossDb - cfg.pointingLossDb;
     const totalRxGainDb =
@@ -457,15 +440,10 @@ function collectAllSatellites(time) {
   }
 
   function onTopologyChanged() {
-  // удалить все текущие линии радиосети
-  clearRadioLinks();
-
-  // заставить mesh пересчитаться на ближайшем тике
-  radioState.lastUpdateSeconds = 0;
-
-  // (опционально) подсказка в панели, чтобы было видно что сеть сброшена
-  updateRadioMeshInfo("Топология изменилась — радиосеть сброшена, пересчёт на следующем тике.");
-}
+    clearRadioLinks();
+    radioState.lastUpdateSeconds = 0;
+    updateRadioMeshInfo("Топология изменилась — радиосеть сброшена, пересчёт на следующем тике.");
+  }
 
   function createRadioLinkEntity(satA, satB, snrDb) {
     const material = makeLinkMaterial(snrDb);
@@ -495,21 +473,6 @@ function collectAllSatellites(time) {
     return idA < idB ? `${idA}|${idB}` : `${idB}|${idA}`;
   }
 
-  function isMissionSat(ent, time) {
-  const v =
-    ent?.properties?.isMissionSatellite?.getValue?.(time) ??
-    ent?.properties?.isMissionSatellite;
-  return v === true;
-}
-
-function participatesInMesh(ent, time) {
-  const v =
-    ent?.properties?.participatesInMesh?.getValue?.(time) ??
-    ent?.properties?.participatesInMesh;
-  // по умолчанию: обычные mesh-КА считаем участниками
-  return v === undefined ? true : (v === true);
-}
-
   // --- 9. DOM: элементы правой панели ---
 
   const radioEnabledCheckbox     = document.getElementById("radio-enabled");
@@ -522,18 +485,16 @@ function participatesInMesh(ent, time) {
   const radioLinkSummaryEl       = document.getElementById("radio-link-summary");
   const radioEnergySummaryEl     = document.getElementById("radio-energy-summary");
 
-  // init min-distance filter from UI defaults (если элементы есть)
   if (radioLimitMinDistanceCheckbox) {
     radioState.config.minLinkDistanceEnabled = !!radioLimitMinDistanceCheckbox.checked;
   }
   if (radioMinLinkDistanceInput) {
     const v = parseFloat(radioMinLinkDistanceInput.value);
-    radioState.config.minLinkDistanceKm = isFinite(v) && v >= 0 ? v : radioState.config.minLinkDistanceKm;
+    radioState.config.minLinkDistanceKm = isFinite(v) && v >= 0 ? v : (radioState.config.minLinkDistanceKm || 0);
   }
 
   // Антенна – блоки
   const antennaTypeSelect   = document.getElementById("radio-antenna-type");
-    // Профили ФАР
   const phasedProfilesRow   = document.getElementById("phased-profiles-row");
   const phasedProfileSelect = document.getElementById("radio-phased-profile");
   const antennaCommonBlock  = document.getElementById("antenna-common-block");
@@ -546,15 +507,11 @@ function participatesInMesh(ent, time) {
     radioMeshInfoEl.innerHTML = textHtml;
   }
 
-  // --- 9.1. Переключение видимости блоков антенны ---
-
   function updateAntennaBlocksVisibility(type) {
-    if (!type && antennaTypeSelect) {
-      type = antennaTypeSelect.value;
-    }
+    if (!type && antennaTypeSelect) type = antennaTypeSelect.value;
     if (!type) type = radioState.config.antennaType;
 
-    const t = type || "directional";
+    const t = (type || "directional");
 
     if (antennaCommonBlock) {
       antennaCommonBlock.style.display =
@@ -571,11 +528,9 @@ function participatesInMesh(ent, time) {
     if (antennaCustomBlock) {
       antennaCustomBlock.style.display = (t === "custom") ? "block" : "none";
     }
-      // Профили показываем только для ФАР
-  if (phasedProfilesRow) {
-    phasedProfilesRow.style.display = (t === "phased") ? "block" : "none";
-  }
-
+    if (phasedProfilesRow) {
+      phasedProfilesRow.style.display = (t === "phased") ? "block" : "none";
+    }
   }
 
   // --- 10. Обработчики чекбоксов и формы ---
@@ -588,13 +543,13 @@ function participatesInMesh(ent, time) {
         clearRadioLinks();
         updateRadioMeshInfo("Радиомоделирование выключено.");
       } else {
-updateRadioMeshInfo(`
-  <b>Активных линков:</b> 0<br/>
-  <b>КА в сети (mesh):</b> 0<br/>
-  <b>КА в сети (задания/MIS):</b> 0<br/>
-  <b>SNR, dB:</b> -<br/>
-  <small>Ожидание расчёта mesh-сети.</small>
-`);
+        updateRadioMeshInfo(`
+          <b>Активных линков:</b> 0<br/>
+          <b>КА в сети (mesh):</b> 0<br/>
+          <b>КА в сети (задания/MIS):</b> 0<br/>
+          <b>SNR, dB:</b> -<br/>
+          <small>Ожидание расчёта mesh-сети.</small>
+        `);
       }
     });
   }
@@ -603,48 +558,34 @@ updateRadioMeshInfo(`
     radioDrawLinksCheckbox.checked = radioState.drawLinks;
     radioDrawLinksCheckbox.addEventListener("change", function () {
       radioState.drawLinks = !!radioDrawLinksCheckbox.checked;
-      if (!radioState.drawLinks) {
-        clearRadioLinks();
-      }
+      if (!radioState.drawLinks) clearRadioLinks();
     });
   }
 
-  // Ограничение "слишком близких" линков (анти-лаг)
   function syncMinDistanceUI() {
     if (!radioLimitMinDistanceCheckbox || !radioMinDistanceRow) return;
     const on = !!radioLimitMinDistanceCheckbox.checked;
     radioMinDistanceRow.style.display = on ? "block" : "none";
   }
-
-  // первичная синхронизация видимости поля
   syncMinDistanceUI();
 
   if (radioLimitMinDistanceCheckbox) {
-    // начальная синхронизация
-    syncMinDistanceUI();
-
     radioLimitMinDistanceCheckbox.addEventListener("change", function () {
       const on = !!radioLimitMinDistanceCheckbox.checked;
       radioState.config.minLinkDistanceEnabled = on;
       syncMinDistanceUI();
-
-      // при включении/выключении форсим перерисовку
       radioState.lastUpdateSeconds = 0;
     });
   }
 
   if (radioMinLinkDistanceInput) {
-    // применяем значение сразу при вводе
     const applyMinDist = () => {
       const v = parseFloat(radioMinLinkDistanceInput.value);
       radioState.config.minLinkDistanceKm = isFinite(v) && v >= 0 ? v : 0;
       radioState.lastUpdateSeconds = 0;
     };
-
     radioMinLinkDistanceInput.addEventListener("input", applyMinDist);
     radioMinLinkDistanceInput.addEventListener("change", applyMinDist);
-
-    // init from default value
     applyMinDist();
   }
 
@@ -654,7 +595,6 @@ updateRadioMeshInfo(`
       cfg.antennaType = antennaTypeSelect.value || cfg.antennaType;
       updateAntennaBlocksVisibility(cfg.antennaType);
     });
-    // начальная инициализация
     updateAntennaBlocksVisibility(antennaTypeSelect.value);
   } else {
     updateAntennaBlocksVisibility(radioState.config.antennaType);
@@ -664,264 +604,240 @@ updateRadioMeshInfo(`
   // Phased Array (ФАР) profiles (25 GHz)
   // -------------------------------
 
-// Жёстко заданные профили (можно позже заменить на загрузку JSON)
-const PHASED_PROFILES = {
-  A: {
-    name: "A — Дальность 1600 км (баланс)",
-    // Link budget
-    freqMHz: 25000,
-    txPowerDbm: 33,
-    rxSensDbm: -102,
-    minSnrDb: 5,
-    maxRangeKm: 0,
-    noiseFloorDbm: -110,
+  const PHASED_PROFILES = {
+    A: {
+      name: "A — Дальность 1600 км (баланс)",
+      freqMHz: 25000,
+      txPowerDbm: 33,
+      rxSensDbm: -102,
+      minSnrDb: 5,
+      maxRangeKm: 0,
+      noiseFloorDbm: -110,
 
-    // Antenna (phased)
-    antennaType: "phased",
-    gainTxDb: 32,
-    gainRxDb: 32,
-    beamWidthDeg: 4,
-    pointingLossDb: 1.0,
-    polLossDb: 0.3,
-    phasedMaxScanDeg: 30,
-    phasedScanLossDb: 1.7,
+      antennaType: "phased",
+      gainTxDb: 32,
+      gainRxDb: 32,
+      beamWidthDeg: 4,
+      pointingLossDb: 1.0,
+      polLossDb: 0.3,
+      phasedMaxScanDeg: 30,
+      phasedScanLossDb: 1.7,
 
-    // Feeder/impl
-    txFeederLossDb: 1.0,
-    rxFeederLossDb: 1.0,
-    implLossDb: 1.0,
+      txFeederLossDb: 1.0,
+      rxFeederLossDb: 1.0,
+      implLossDb: 1.0,
 
-    // MCS
-    modulation: "QPSK",
-    codingRate: 0.5,     // 1/2
-    dataRateMbps: 50,
-    bandwidthMHz: 10,
+      modulation: "QPSK",
+      codingRate: 0.5,
+      dataRateMbps: 50,
+      bandwidthMHz: 10,
 
-    // Noise
-    sysTempK: 700,
-    noiseBandwidthMHz: 10,
+      sysTempK: 700,
+      noiseBandwidthMHz: 10,
 
-    // Mesh
-    maxNeighborsPerSat: 4,
-    routingMetric: "snr_distance",
+      maxNeighborsPerSat: 4,
+      routingMetric: "snr_distance",
 
-    // Power
-    txElecPowerW: 80,
-    dutyCycle: 0.2,      // 20%
-    refDistanceKm: 1600
-  },
+      txElecPowerW: 80,
+      dutyCycle: 0.2,
+      refDistanceKm: 1600
+    },
 
-  B: {
-    name: "B — Скорость (throughput)",
-    // База A + отличия (и чуть усиление)
-    freqMHz: 25000,
-    txPowerDbm: 33,
-    rxSensDbm: -102,
-    minSnrDb: 6,        // рекомендовано
-    maxRangeKm: 0,
-    noiseFloorDbm: -110,
+    B: {
+      name: "B — Скорость (throughput)",
+      freqMHz: 25000,
+      txPowerDbm: 33,
+      rxSensDbm: -102,
+      minSnrDb: 6,
+      maxRangeKm: 0,
+      noiseFloorDbm: -110,
 
-    antennaType: "phased",
-    gainTxDb: 38,
-    gainRxDb: 38,
-    beamWidthDeg: 4,
-    pointingLossDb: 1.0,
-    polLossDb: 0.3,
-    phasedMaxScanDeg: 30,
-    phasedScanLossDb: 1.7,
+      antennaType: "phased",
+      gainTxDb: 38,
+      gainRxDb: 38,
+      beamWidthDeg: 4,
+      pointingLossDb: 1.0,
+      polLossDb: 0.3,
+      phasedMaxScanDeg: 30,
+      phasedScanLossDb: 1.7,
 
-    txFeederLossDb: 1.0,
-    rxFeederLossDb: 1.0,
-    implLossDb: 1.0,
+      txFeederLossDb: 1.0,
+      rxFeederLossDb: 1.0,
+      implLossDb: 1.0,
 
-    modulation: "QPSK",
-    codingRate: 0.5,    // 1/2
-    dataRateMbps: 100,
-    bandwidthMHz: 20,
+      modulation: "QPSK",
+      codingRate: 0.5,
+      dataRateMbps: 100,
+      bandwidthMHz: 20,
 
-    sysTempK: 700,
-    noiseBandwidthMHz: 20,
+      sysTempK: 700,
+      noiseBandwidthMHz: 20,
 
-    maxNeighborsPerSat: 4,
-    routingMetric: "snr_distance",
+      maxNeighborsPerSat: 4,
+      routingMetric: "snr_distance",
 
-    txElecPowerW: 80,
-    dutyCycle: 0.2,
-    refDistanceKm: 1600
-  },
+      txElecPowerW: 80,
+      dutyCycle: 0.2,
+      refDistanceKm: 1600
+    },
 
-  C: {
-    name: "C — Надёжность (доступность)",
-    freqMHz: 25000,
-    txPowerDbm: 33,
-    rxSensDbm: -102,
-    minSnrDb: 4,        // ниже порог
-    maxRangeKm: 0,
-    noiseFloorDbm: -110,
+    C: {
+      name: "C — Надёжность (доступность)",
+      freqMHz: 25000,
+      txPowerDbm: 33,
+      rxSensDbm: -102,
+      minSnrDb: 4,
+      maxRangeKm: 0,
+      noiseFloorDbm: -110,
 
-    antennaType: "phased",
-    gainTxDb: 32,
-    gainRxDb: 32,
-    beamWidthDeg: 4,
-    pointingLossDb: 1.0,
-    polLossDb: 0.3,
-    phasedMaxScanDeg: 25,    // 20–25 → берём 25
-    phasedScanLossDb: 1.5,
+      antennaType: "phased",
+      gainTxDb: 32,
+      gainRxDb: 32,
+      beamWidthDeg: 4,
+      pointingLossDb: 1.0,
+      polLossDb: 0.3,
+      phasedMaxScanDeg: 25,
+      phasedScanLossDb: 1.5,
 
-    txFeederLossDb: 1.0,
-    rxFeederLossDb: 1.0,
-    implLossDb: 1.0,
+      txFeederLossDb: 1.0,
+      rxFeederLossDb: 1.0,
+      implLossDb: 1.0,
 
-    modulation: "QPSK",
-    codingRate: 0.5,
-    dataRateMbps: 30,    // “лучше 30”
-    bandwidthMHz: 10,
+      modulation: "QPSK",
+      codingRate: 0.5,
+      dataRateMbps: 30,
+      bandwidthMHz: 10,
 
-    sysTempK: 700,
-    noiseBandwidthMHz: 10,
+      sysTempK: 700,
+      noiseBandwidthMHz: 10,
 
-    maxNeighborsPerSat: 6,   // больше связности
-    routingMetric: "snr_distance",
+      maxNeighborsPerSat: 6,
+      routingMetric: "snr_distance",
 
-    txElecPowerW: 80,
-    dutyCycle: 0.2,
-    refDistanceKm: 1600
+      txElecPowerW: 80,
+      dutyCycle: 0.2,
+      refDistanceKm: 1600
+    }
+  };
+
+  function setElValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === undefined || value === null) return;
+    el.value = String(value);
   }
-};
 
-// Утилита: поставить value в input/select если элемент существует
-function setElValue(id, value) {
-  const el = document.getElementById(id);
-  if (!el || value === undefined || value === null) return;
-  el.value = String(value);
-}
+  function setSelectValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === undefined || value === null) return;
+    el.value = String(value);
+  }
 
-// Утилита: выбрать option в select по value
-function setSelectValue(id, value) {
-  const el = document.getElementById(id);
-  if (!el || value === undefined || value === null) return;
-  el.value = String(value);
-}
+  function applyPhasedProfileToUI(profileKey) {
+    const p = PHASED_PROFILES[profileKey];
+    if (!p) return false;
 
-// Применить профиль к UI (чтобы пользователь ВИДЕЛ заполнение)
-function applyPhasedProfileToUI(profileKey) {
-  const p = PHASED_PROFILES[profileKey];
-  if (!p) return false;
+    setSelectValue("radio-antenna-type", "phased");
+    radioState.config.antennaType = "phased";
+    updateAntennaBlocksVisibility("phased");
 
-  // Принудительно включаем ФАР в UI
-  setSelectValue("radio-antenna-type", "phased");
-  radioState.config.antennaType = "phased";
-  updateAntennaBlocksVisibility("phased");
+    setElValue("radio-freq-mhz", p.freqMHz);
+    setElValue("radio-tx-power", p.txPowerDbm);
+    setElValue("radio-rx-sens", p.rxSensDbm);
+    setElValue("radio-min-snr", p.minSnrDb);
+    setElValue("radio-max-range-km", p.maxRangeKm);
+    setElValue("radio-noise-floor", p.noiseFloorDbm);
 
-  // Link budget
-  setElValue("radio-freq-mhz", p.freqMHz);
-  setElValue("radio-tx-power", p.txPowerDbm);
-  setElValue("radio-rx-sens", p.rxSensDbm);
-  setElValue("radio-min-snr", p.minSnrDb);
-  setElValue("radio-max-range-km", p.maxRangeKm);
-  setElValue("radio-noise-floor", p.noiseFloorDbm);
+    setElValue("radio-gain-tx", p.gainTxDb);
+    setElValue("radio-gain-rx", p.gainRxDb);
+    setElValue("radio-beam-width", p.beamWidthDeg);
+    setElValue("radio-pointing-loss", p.pointingLossDb);
+    setElValue("radio-pol-loss", p.polLossDb);
 
-  // Antenna common
-  setElValue("radio-gain-tx", p.gainTxDb);
-  setElValue("radio-gain-rx", p.gainRxDb);
-  setElValue("radio-beam-width", p.beamWidthDeg);
-  setElValue("radio-pointing-loss", p.pointingLossDb);
-  setElValue("radio-pol-loss", p.polLossDb);
+    setElValue("radio-phased-max-scan", p.phasedMaxScanDeg);
+    setElValue("radio-phased-scan-loss", p.phasedScanLossDb);
 
-  // Phased only
-  setElValue("radio-phased-max-scan", p.phasedMaxScanDeg);
-  setElValue("radio-phased-scan-loss", p.phasedScanLossDb);
+    setElValue("radio-tx-feeder-loss", p.txFeederLossDb);
+    setElValue("radio-rx-feeder-loss", p.rxFeederLossDb);
+    setElValue("radio-impl-loss", p.implLossDb);
 
-  // Losses
-  setElValue("radio-tx-feeder-loss", p.txFeederLossDb);
-  setElValue("radio-rx-feeder-loss", p.rxFeederLossDb);
-  setElValue("radio-impl-loss", p.implLossDb);
+    setSelectValue("radio-modulation", p.modulation);
+    setSelectValue("radio-coding-rate", p.codingRate);
+    setElValue("radio-data-rate-mbps", p.dataRateMbps);
+    setElValue("radio-bandwidth-mhz", p.bandwidthMHz);
 
-  // MCS
-  setSelectValue("radio-modulation", p.modulation);
-  setSelectValue("radio-coding-rate", p.codingRate); // у тебя values: 0.5 / 0.6667 / 0.75
-  setElValue("radio-data-rate-mbps", p.dataRateMbps);
-  setElValue("radio-bandwidth-mhz", p.bandwidthMHz);
+    setElValue("radio-sys-temp-k", p.sysTempK);
+    setElValue("radio-noise-bandwidth-mhz", p.noiseBandwidthMHz);
 
-  // Noise
-  setElValue("radio-sys-temp-k", p.sysTempK);
-  setElValue("radio-noise-bandwidth-mhz", p.noiseBandwidthMHz);
+    setElValue("radio-mesh-max-neighbors", p.maxNeighborsPerSat);
+    setSelectValue("radio-mesh-metric", p.routingMetric);
 
-  // Mesh
-  setElValue("radio-mesh-max-neighbors", p.maxNeighborsPerSat);
-  setSelectValue("radio-mesh-metric", p.routingMetric);
+    setElValue("radio-tx-elec-power", p.txElecPowerW);
+    setElValue("radio-duty-cycle", p.dutyCycle * 100.0);
+    setElValue("radio-ref-distance-km", p.refDistanceKm);
 
-  // Power
-  setElValue("radio-tx-elec-power", p.txElecPowerW);
-  setElValue("radio-duty-cycle", p.dutyCycle * 100.0);
-  setElValue("radio-ref-distance-km", p.refDistanceKm);
+    return true;
+  }
 
-  return true;
-}
+  function applyPhasedProfileToConfig(profileKey) {
+    const p = PHASED_PROFILES[profileKey];
+    if (!p) return false;
 
-// Применить профиль сразу в config (без чтения из формы)
-function applyPhasedProfileToConfig(profileKey) {
-  const p = PHASED_PROFILES[profileKey];
-  if (!p) return false;
+    const cfg = radioState.config;
 
-  const cfg = radioState.config;
+    Object.assign(cfg, {
+      freqMHz: p.freqMHz,
+      txPowerDbm: p.txPowerDbm,
+      rxSensDbm: p.rxSensDbm,
+      minSnrDb: p.minSnrDb,
+      maxRangeKm: p.maxRangeKm,
+      noiseFloorDbm: p.noiseFloorDbm,
 
-  // просто переносим значения
-  Object.assign(cfg, {
-    freqMHz: p.freqMHz,
-    txPowerDbm: p.txPowerDbm,
-    rxSensDbm: p.rxSensDbm,
-    minSnrDb: p.minSnrDb,
-    maxRangeKm: p.maxRangeKm,
-    noiseFloorDbm: p.noiseFloorDbm,
+      antennaType: "phased",
+      gainTxDb: p.gainTxDb,
+      gainRxDb: p.gainRxDb,
+      beamWidthDeg: p.beamWidthDeg,
+      pointingLossDb: p.pointingLossDb,
+      polLossDb: p.polLossDb,
+      phasedMaxScanDeg: p.phasedMaxScanDeg,
+      phasedScanLossDb: p.phasedScanLossDb,
 
-    antennaType: "phased",
-    gainTxDb: p.gainTxDb,
-    gainRxDb: p.gainRxDb,
-    beamWidthDeg: p.beamWidthDeg,
-    pointingLossDb: p.pointingLossDb,
-    polLossDb: p.polLossDb,
-    phasedMaxScanDeg: p.phasedMaxScanDeg,
-    phasedScanLossDb: p.phasedScanLossDb,
+      txFeederLossDb: p.txFeederLossDb,
+      rxFeederLossDb: p.rxFeederLossDb,
+      implLossDb: p.implLossDb,
 
-    txFeederLossDb: p.txFeederLossDb,
-    rxFeederLossDb: p.rxFeederLossDb,
-    implLossDb: p.implLossDb,
+      modulation: p.modulation,
+      codingRate: p.codingRate,
+      dataRateMbps: p.dataRateMbps,
+      bandwidthMHz: p.bandwidthMHz,
 
-    modulation: p.modulation,
-    codingRate: p.codingRate,
-    dataRateMbps: p.dataRateMbps,
-    bandwidthMHz: p.bandwidthMHz,
+      sysTempK: p.sysTempK,
+      noiseBandwidthMHz: p.noiseBandwidthMHz,
 
-    sysTempK: p.sysTempK,
-    noiseBandwidthMHz: p.noiseBandwidthMHz,
+      maxNeighborsPerSat: p.maxNeighborsPerSat,
+      routingMetric: p.routingMetric,
 
-    maxNeighborsPerSat: p.maxNeighborsPerSat,
-    routingMetric: p.routingMetric,
+      txElecPowerW: p.txElecPowerW,
+      dutyCycle: p.dutyCycle,
+      refDistanceKm: p.refDistanceKm
+    });
 
-    txElecPowerW: p.txElecPowerW,
-    dutyCycle: p.dutyCycle,
-    refDistanceKm: p.refDistanceKm
-  });
+    return true;
+  }
 
-  return true;
-}
   if (radioForm) {
     radioForm.addEventListener("submit", function (e) {
       e.preventDefault();
-      // --- Если выбран профиль ФАР — сначала заполняем UI и config ---
+
       if (phasedProfileSelect) {
         const key = phasedProfileSelect.value;
         if (key && key !== "manual") {
-          applyPhasedProfileToUI(key);      // чтобы ПОЛЯ поменялись на странице
-          applyPhasedProfileToConfig(key);  // чтобы cfg точно стал как в профиле
-          // дальше код ниже прочитает эти же значения из формы (и ничего не сломается)
+          applyPhasedProfileToUI(key);
+          applyPhasedProfileToConfig(key);
         }
       }
 
       const cfg = radioState.config;
 
-      // Базовые
       const freqInput         = document.getElementById("radio-freq-mhz");
       const txInput           = document.getElementById("radio-tx-power");
       const gTxInput          = document.getElementById("radio-gain-tx");
@@ -934,50 +850,40 @@ function applyPhasedProfileToConfig(profileKey) {
       const minDistEnabledInput = document.getElementById("radio-limit-min-distance");
       const minDistKmInput = document.getElementById("radio-min-link-distance-km");
 
-      // MCS
       const modInput          = document.getElementById("radio-modulation");
       const codingInput       = document.getElementById("radio-coding-rate");
       const dataRateInput     = document.getElementById("radio-data-rate-mbps");
       const bwInput           = document.getElementById("radio-bandwidth-mhz");
 
-      // Антенна: тип, общие параметры
       const antTypeInput      = document.getElementById("radio-antenna-type");
       const beamWidthInput    = document.getElementById("radio-beam-width");
       const pointingLossInput = document.getElementById("radio-pointing-loss");
       const polLossInput      = document.getElementById("radio-pol-loss");
 
-      // ФАР
       const phasedMaxScanInput  = document.getElementById("radio-phased-max-scan");
       const phasedScanLossInput = document.getElementById("radio-phased-scan-loss");
 
-      // Omni
       const omniGainInput     = document.getElementById("radio-omni-gain");
 
-      // Custom
       const customGainInput       = document.getElementById("radio-custom-gain");
       const customBeamwidthInput  = document.getElementById("radio-custom-beamwidth");
       const customSidelobeInput   = document.getElementById("radio-custom-sidelobe");
       const customAngleLossInput  = document.getElementById("radio-custom-angle-loss");
 
-      // Потери тракта
       const txFeedLossInput   = document.getElementById("radio-tx-feeder-loss");
       const rxFeedLossInput   = document.getElementById("radio-rx-feeder-loss");
       const implLossInput     = document.getElementById("radio-impl-loss");
 
-      // Шум
       const sysTempInput      = document.getElementById("radio-sys-temp-k");
       const noiseBwInput      = document.getElementById("radio-noise-bandwidth-mhz");
 
-      // Mesh
       const maxNeighInput     = document.getElementById("radio-mesh-max-neighbors");
       const meshMetricInput   = document.getElementById("radio-mesh-metric");
 
-      // Энергетика
       const txElecPowerInput  = document.getElementById("radio-tx-elec-power");
       const dutyCycleInput    = document.getElementById("radio-duty-cycle");
       const refDistInput      = document.getElementById("radio-ref-distance-km");
 
-      // Применяем базовые
       if (freqInput)      cfg.freqMHz        = parseFloat(freqInput.value)      || cfg.freqMHz;
       if (txInput)        cfg.txPowerDbm     = parseFloat(txInput.value)        || cfg.txPowerDbm;
       if (gTxInput)       cfg.gainTxDb       = parseFloat(gTxInput.value)       || cfg.gainTxDb;
@@ -990,14 +896,12 @@ function applyPhasedProfileToConfig(profileKey) {
         cfg.maxRangeKm = isNaN(v) ? 0 : v;
       }
 
-      // Минимальная дистанция линка (анти-лаг)
       if (minDistEnabledInput) cfg.minLinkDistanceEnabled = !!minDistEnabledInput.checked;
       if (minDistKmInput) {
         const v = parseFloat(minDistKmInput.value);
-        cfg.minLinkDistanceKm = !isNaN(v) && v >= 0 ? v : 0;
+        cfg.minLinkDistanceKm = isFinite(v) && v >= 0 ? v : 0;
       }
 
-      // MCS
       if (modInput)       cfg.modulation     = modInput.value || cfg.modulation;
       if (codingInput) {
         const v = parseFloat(codingInput.value);
@@ -1012,7 +916,6 @@ function applyPhasedProfileToConfig(profileKey) {
         cfg.bandwidthMHz = !isNaN(v) && v > 0 ? v : cfg.bandwidthMHz;
       }
 
-      // Антенна
       if (antTypeInput)   cfg.antennaType    = antTypeInput.value || cfg.antennaType;
       if (beamWidthInput) {
         const v = parseFloat(beamWidthInput.value);
@@ -1058,7 +961,6 @@ function applyPhasedProfileToConfig(profileKey) {
         cfg.customAngleLossDbPerDeg = !isNaN(v) ? v : cfg.customAngleLossDbPerDeg;
       }
 
-      // Потери тракта
       if (txFeedLossInput) {
         const v = parseFloat(txFeedLossInput.value);
         cfg.txFeederLossDb = !isNaN(v) ? v : cfg.txFeederLossDb;
@@ -1072,7 +974,6 @@ function applyPhasedProfileToConfig(profileKey) {
         cfg.implLossDb = !isNaN(v) ? v : cfg.implLossDb;
       }
 
-      // Шум
       if (sysTempInput) {
         const v = parseFloat(sysTempInput.value);
         cfg.sysTempK = !isNaN(v) && v > 0 ? v : cfg.sysTempK;
@@ -1082,7 +983,6 @@ function applyPhasedProfileToConfig(profileKey) {
         cfg.noiseBandwidthMHz = !isNaN(v) && v > 0 ? v : cfg.noiseBandwidthMHz;
       }
 
-      // Mesh
       if (maxNeighInput) {
         const v = parseInt(maxNeighInput.value, 10);
         cfg.maxNeighborsPerSat = !isNaN(v) && v >= 0 ? v : cfg.maxNeighborsPerSat;
@@ -1091,7 +991,6 @@ function applyPhasedProfileToConfig(profileKey) {
         cfg.routingMetric = meshMetricInput.value || cfg.routingMetric;
       }
 
-      // Энергетика
       if (txElecPowerInput) {
         const v = parseFloat(txElecPowerInput.value);
         cfg.txElecPowerW = !isNaN(v) && v >= 0 ? v : cfg.txElecPowerW;
@@ -1105,10 +1004,8 @@ function applyPhasedProfileToConfig(profileKey) {
         cfg.refDistanceKm = !isNaN(v) && v > 0 ? v : cfg.refDistanceKm;
       }
 
-      // Обновляем видимость блоков антенны после изменения
       updateAntennaBlocksVisibility(cfg.antennaType);
 
-      // Краткий фидбек
       const noiseFromTemp = computeNoiseFloorFromTemp(cfg).toFixed(1);
       updateRadioMeshInfo(
         `<b>Параметры обновлены.</b><br/>
@@ -1117,7 +1014,6 @@ function applyPhasedProfileToConfig(profileKey) {
          MaxRange = ${cfg.maxRangeKm > 0 ? cfg.maxRangeKm + " км" : "не ограничена (по радиофизике)"}`
       );
 
-      // Форсим перерасчёт сети и обновление summary при ближайшем тике
       radioState.lastUpdateSeconds = 0;
       updateSingleLinkAndEnergySummary();
     });
@@ -1130,7 +1026,7 @@ function applyPhasedProfileToConfig(profileKey) {
     if (B_Hz <= 0 || !isFinite(snrDb)) return NaN;
 
     const snrLin = Math.pow(10, snrDb / 10);
-    const C_bps = B_Hz * Math.log2(1 + snrLin); // формула Шеннона
+    const C_bps = B_Hz * Math.log2(1 + snrLin);
     return C_bps / 1e6;
   }
 
@@ -1138,21 +1034,13 @@ function applyPhasedProfileToConfig(profileKey) {
     const cfg = radioState.config;
     if (!radioLinkSummaryEl && !radioEnergySummaryEl) return;
 
-    // --- Single-link summary ---
-
-    // Референсная дальность: либо cfg.refDistanceKm, либо последняя средняя по сети
     let dRefKm = cfg.refDistanceKm;
-    if ((!dRefKm || dRefKm <= 0) && radioState.lastAvgLinkDistKm > 0) {
-      dRefKm = radioState.lastAvgLinkDistKm;
-    }
-    if (!dRefKm || dRefKm <= 0) {
-      dRefKm = 1000; // дефолт
-    }
+    if ((!dRefKm || dRefKm <= 0) && radioState.lastAvgLinkDistKm > 0) dRefKm = radioState.lastAvgLinkDistKm;
+    if (!dRefKm || dRefKm <= 0) dRefKm = 1000;
 
     const dRefMeters = dRefKm * 1000;
     const fsplRefDb = computeFsplDb(dRefMeters, cfg.freqMHz);
 
-    // Эффективные усиления по типу антенны (как в evaluateLink)
     const { effGainTxDb, effGainRxDb, extraLossDb } = getEffectiveAntennaGains(cfg);
 
     const totalTxGainDb =
@@ -1172,25 +1060,21 @@ function applyPhasedProfileToConfig(profileKey) {
 
     const snrRefDb = rxRefDbm - noiseFromTemp;
 
-    // Eb/N0 для заданного Rb и B
     const Rb = cfg.dataRateMbps * 1e6;
     const B_Hz = cfg.bandwidthMHz * 1e6;
     let ebnoRefDb = NaN;
     if (Rb > 0 && B_Hz > 0 && isFinite(snrRefDb)) {
-      const ratio = Rb / B_Hz; // Rb/B
+      const ratio = Rb / B_Hz;
       ebnoRefDb = snrRefDb - 10 * Math.log10(ratio);
     }
     const ebnoReqDb = getRequiredEbNoDb(cfg.modulation, cfg.codingRate);
     const ebnoMarginDb = isFinite(ebnoRefDb) ? ebnoRefDb - ebnoReqDb : NaN;
 
-    // Оценка C_max по Шеннону
     const capRefMbps = computeCapacityMbps(cfg, snrRefDb);
 
-    // Оценка максимальной дальности по Rx и SNR
     const gainsDb =
       cfg.txPowerDbm + totalTxGainDb + totalRxGainDb - cfg.implLossDb - extraLossDb;
 
-    // 1) по чувствительности
     let rMaxRxKm = NaN;
     if (gainsDb > cfg.rxSensDbm) {
       const fsplLimitRx = gainsDb - cfg.rxSensDbm;
@@ -1201,7 +1085,6 @@ function applyPhasedProfileToConfig(profileKey) {
       rMaxRxKm = dKmRx;
     }
 
-    // 2) по SNR
     let rMaxSnrKm = NaN;
     if (isFinite(noiseFromTemp)) {
       const rxAtSnr = noiseFromTemp + cfg.minSnrDb;
@@ -1216,13 +1099,9 @@ function applyPhasedProfileToConfig(profileKey) {
     }
 
     let rMaxKm = NaN;
-    if (isFinite(rMaxRxKm) && isFinite(rMaxSnrKm)) {
-      rMaxKm = Math.min(rMaxRxKm, rMaxSnrKm);
-    } else if (isFinite(rMaxRxKm)) {
-      rMaxKm = rMaxRxKm;
-    } else if (isFinite(rMaxSnrKm)) {
-      rMaxKm = rMaxSnrKm;
-    }
+    if (isFinite(rMaxRxKm) && isFinite(rMaxSnrKm)) rMaxKm = Math.min(rMaxRxKm, rMaxSnrKm);
+    else if (isFinite(rMaxRxKm)) rMaxKm = rMaxRxKm;
+    else if (isFinite(rMaxSnrKm)) rMaxKm = rMaxSnrKm;
 
     if (radioLinkSummaryEl) {
       radioLinkSummaryEl.innerHTML =
@@ -1242,18 +1121,14 @@ function applyPhasedProfileToConfig(profileKey) {
          итог ≈ <b>${isFinite(rMaxKm) ? rMaxKm.toFixed(0) : "-"}</b> км`;
     }
 
-    // --- Энергетика КА ---
-
     if (radioEnergySummaryEl) {
-      const Ptx = cfg.txElecPowerW; // W
-      const duty = cfg.dutyCycle;   // 0…1
+      const Ptx = cfg.txElecPowerW;
+      const duty = cfg.dutyCycle;
       let Ebit_J = NaN;
-      if (Ptx > 0 && Rb > 0) {
-        Ebit_J = Ptx / Rb;
-      }
+      if (Ptx > 0 && Rb > 0) Ebit_J = Ptx / Rb;
 
       const Pavg = Ptx * duty;
-      const Torbit = computeAverageOrbitPeriodSec(); // сек
+      const Torbit = computeAverageOrbitPeriodSec();
       const Eorbit_J = Pavg * Torbit;
       const Eorbit_Wh = Eorbit_J / 3600.0;
 
@@ -1271,19 +1146,15 @@ function applyPhasedProfileToConfig(profileKey) {
   // --- 12. Основной цикл: пересчёт mesh-сети ---
 
   clock.onTick.addEventListener(function (clockEvent) {
-    if (!radioState.enabled) {
-      return;
-    }
+    if (!radioState.enabled) return;
 
     const time = clockEvent.currentTime;
     const seconds = Cesium.JulianDate.secondsDifference(time, startTime);
 
-    if (seconds - radioState.lastUpdateSeconds < radioState.updatePeriodSec) {
-      return;
-    }
+    if (seconds - radioState.lastUpdateSeconds < radioState.updatePeriodSec) return;
     radioState.lastUpdateSeconds = seconds;
 
-    const { sats, meshIdSet } = collectAllSatellites(time);
+    const { sats, satKindById } = collectAllSatellites(time);
     const n = sats.length;
 
     if (n < 2) {
@@ -1296,10 +1167,7 @@ function applyPhasedProfileToConfig(profileKey) {
 
     const cfg = radioState.config;
 
-    // Если линии временно отключены — очищаем существующие, но считаем статистику
-    if (!radioState.drawLinks && radioState.linksByKey.size > 0) {
-      clearRadioLinks();
-    }
+    if (!radioState.drawLinks && radioState.linksByKey.size > 0) clearRadioLinks();
 
     let linksCount = 0;
     let snrMin = Number.POSITIVE_INFINITY;
@@ -1312,19 +1180,27 @@ function applyPhasedProfileToConfig(profileKey) {
     let capacitySumMbps = 0;
 
     const maxNeigh = cfg.maxNeighborsPerSat || 0;
+
+    // степень "для статистики" (все рёбра)
     const degrees = new Array(n).fill(0);
+
+    // степень ТОЛЬКО по mesh↔mesh (ограничивается maxNeigh)
+    const meshDegrees = new Array(n).fill(0);
     const activeKeys = new Set();
 
-    // Снимок активных рёбер для внешних модулей
+    const misMaxLinks = cfg.misMaxLinks || 3;
+    const misDegrees = new Array(n).fill(0); // степень только по MIS↔mesh для MIS-узлов
+
+
+    // Перестраиваем снимок текущих активных ребёр
     radioState.activeEdgesByKey.clear();
 
-    // Перебор всех пар (i < j) — сначала собираем кандидатов, затем строим топологию с приоритетом MIS
-    const MIS_RESERVE_PER_MESH = 1; // каждый mesh-КА может взять +1 "резервный" MIS-линк сверх maxNeighborsPerSat
-    const MIS_MAX_LINKS = 1;        // MIS-КА (в состоянии IDLE) держит максимум 1 линк (достаточно, чтобы "быть в сети")
+    // --- Генерация кандидатов (единая логика) ---
+    const candidates = [];
+    const candidateByKey = new Map();
 
-    // Кандидаты (оценка линков не зависит от порядка)
-    const candidatesMis = [];   // MIS ↔ mesh
-    const candidatesMesh = [];  // mesh ↔ mesh
+    // Список ключей прошлого тика
+    const prevKeySet = new Set(radioState.prevActiveEdgesByKey ? radioState.prevActiveEdgesByKey.keys() : []);
 
     for (let i = 0; i < n; i++) {
       const satA = sats[i];
@@ -1339,41 +1215,50 @@ function applyPhasedProfileToConfig(profileKey) {
         const aIsMis = isMissionSat(satA, time);
         const bIsMis = isMissionSat(satB, time);
 
-        // 1) Запрещаем MIS ↔ MIS
-        if (aIsMis && bIsMis) continue;
+        // Если запрещены MIS↔MIS (можно переключать конфигом)
+        if (!cfg.allowMisToMis && aIsMis && bIsMis) continue;
 
-        // 2) MIS ↔ mesh only (mesh = только те, кто пришёл из orbitStore)
-        if (aIsMis && !meshIdSet.has(satB.id)) continue;
-        if (bIsMis && !meshIdSet.has(satA.id)) continue;
-
-        // 3) MIS участвует только если participatesInMesh=true
-        if (aIsMis && !participatesInMesh(satA, time)) continue;
-        if (bIsMis && !participatesInMesh(satB, time)) continue;
-
+        // Оценка линка по радиофизике
         const evalRes = evaluateLink(posA, posB);
         if (!evalRes.linkUp) continue;
 
         const key = makeLinkKey(satA.id, satB.id);
 
-        // Score: выше SNR и ниже расстояние — лучше
+        // базовый score: выше SNR и ближе — лучше
         const snr = isFinite(evalRes.snrDb) ? evalRes.snrDb : -9999;
         const dist = isFinite(evalRes.distanceKm) ? evalRes.distanceKm : 1e12;
-        const score = snr * 1000 - dist;
+        // MIS↔mesh — сильнее штрафуем расстояние
+        const isMisEdge = aIsMis !== bIsMis;
+        const baseScore = isMisEdge ? (snr * 1000 - dist * 2.0) : (snr * 1000 - dist);
 
-        const edge = { i, j, satA, satB, key, evalRes, score, aIsMis, bIsMis };
+        // sticky bonus, если ребро было активно на прошлом тике
+        const wasPrev = prevKeySet.has(key);
+        const score = baseScore + (wasPrev ? (cfg.stickyBonus || 0) : 0);
 
-        if (aIsMis || bIsMis) candidatesMis.push(edge);
-        else candidatesMesh.push(edge);
+        const edge = { i, j, satA, satB, key, evalRes, score, aIsMis, bIsMis, baseScore, wasPrev };
+        candidates.push(edge);
+        candidateByKey.set(key, edge);
       }
     }
 
-    // --- Аллокация линков с приоритетом MIS ---
-
-    const misDegree = new Array(n).fill(0);          // степень только для MIS-КА
-    const meshMisReserveUsed = new Array(n).fill(0); // сколько "резервных" MIS-линков уже взял mesh-КА
+    // Сортируем: сначала наиболее “ценные” (включая sticky)
+    candidates.sort((a, b) => b.score - a.score);
 
     function activateEdge(edge) {
-      const { i, j, satA, satB, key, evalRes, aIsMis, bIsMis } = edge;
+      const { i, j, satA, satB, key, evalRes, aIsMis, bIsMis, baseScore } = edge;
+
+      // --- лимит линков для MIS (только MIS↔mesh) ---
+      if (edge.aIsMis !== edge.bIsMis) { // значит это MIS↔mesh
+        if (edge.aIsMis) {
+          if (misDegrees[edge.i] >= misMaxLinks) return;
+        } else {
+          if (misDegrees[edge.j] >= misMaxLinks) return;
+        }
+      }
+      if (edge.aIsMis !== edge.bIsMis) {
+        if (edge.aIsMis) misDegrees[edge.i]++; else misDegrees[edge.j]++;
+      }
+
 
       if (activeKeys.has(key)) return;
       activeKeys.add(key);
@@ -1382,8 +1267,13 @@ function applyPhasedProfileToConfig(profileKey) {
       degrees[i]++;
       degrees[j]++;
 
-      if (aIsMis) misDegree[i]++;
-      if (bIsMis) misDegree[j]++;
+      // ограничение maxNeighbors применяется только к mesh↔mesh,
+      // поэтому считаем отдельную степень для mesh↔mesh
+      const isMeshMesh = !(aIsMis || bIsMis); // т.к. isMisEdge = (aIsMis || bIsMis)
+      if (isMeshMesh) {
+        meshDegrees[i]++;
+        meshDegrees[j]++;
+      }
 
       let capMbps = NaN;
       if (isFinite(evalRes.snrDb)) {
@@ -1396,7 +1286,6 @@ function applyPhasedProfileToConfig(profileKey) {
         if (isFinite(capMbps)) capacitySumMbps += capMbps;
       }
 
-      // сохраняем ребро в снимок (для маршрутизации)
       radioState.activeEdgesByKey.set(key, {
         key,
         aId: satA.id,
@@ -1406,7 +1295,8 @@ function applyPhasedProfileToConfig(profileKey) {
         snrDb: evalRes.snrDb,
         noiseFloorDbm: evalRes.noiseFloorDbm,
         capacityMbps: capMbps,
-        isMisEdge: !!(aIsMis || bIsMis)
+        isMisEdge: !!(aIsMis || bIsMis),
+        score: baseScore
       });
 
       if (isFinite(evalRes.distanceKm)) {
@@ -1425,61 +1315,37 @@ function applyPhasedProfileToConfig(profileKey) {
       }
     }
 
-    // 1) Сначала: гарантируем, что каждый IDLE MIS получит хотя бы 1 лучший линк к mesh,
-    //    даже если mesh уже "заполнен" — за счёт MIS_RESERVE_PER_MESH.
-    const byMisIndex = new Map(); // misIndex -> edges[]
-    for (const e of candidatesMis) {
-      const misIdx = e.aIsMis ? e.i : e.j;
-      if (!byMisIndex.has(misIdx)) byMisIndex.set(misIdx, []);
-      byMisIndex.get(misIdx).push(e);
-    }
-
-    for (const [misIdx, list] of byMisIndex.entries()) {
-      // лучшие варианты для данного MIS
-      list.sort((a, b) => b.score - a.score);
-
-      for (const e of list) {
-        if (misDegree[misIdx] >= MIS_MAX_LINKS) break;
-
-        const meshIdx = e.aIsMis ? e.j : e.i;
+    // --- Шаг 1: попробуем сохранить прошлые рёбра (если они всё ещё возможны) ---
+    // Это делает make-before-break на уровне всей сети.
+    if (radioState.prevActiveEdgesByKey && radioState.prevActiveEdgesByKey.size > 0) {
+      for (const prev of radioState.prevActiveEdgesByKey.values()) {
+        const edge = candidateByKey.get(prev.key);
+        if (!edge) continue;
 
         if (maxNeigh > 0) {
-          const withinBase = degrees[meshIdx] < maxNeigh;
-          const canUseReserve =
-            MIS_RESERVE_PER_MESH > 0 &&
-            meshMisReserveUsed[meshIdx] < MIS_RESERVE_PER_MESH &&
-            degrees[meshIdx] < (maxNeigh + MIS_RESERVE_PER_MESH);
-
-          if (!withinBase && !canUseReserve) continue;
-
-          // если пришлось зайти "сверх" базового лимита — считаем это резервом под MIS
-          if (!withinBase && canUseReserve) {
-            meshMisReserveUsed[meshIdx] += 1;
+          const isMeshMesh = !(edge.aIsMis || edge.bIsMis);
+          if (isMeshMesh) {
+            if (meshDegrees[edge.i] >= maxNeigh || meshDegrees[edge.j] >= maxNeigh) continue;
           }
         }
-
-        activateEdge(e);
-        break; // MIS получил линк — достаточно
+        activateEdge(edge);
       }
     }
 
-    // 2) Затем: строим mesh↔mesh как обычно, но НЕ позволяем занимать MIS-резерв
-    //    (т.е. степени для mesh↔mesh ограничиваются строго maxNeigh).
-    candidatesMesh.sort((a, b) => b.score - a.score);
-
-    for (const e of candidatesMesh) {
-      const i = e.i;
-      const j = e.j;
+    // --- Шаг 2: добираем рёбра по общему greedy (как для КА связи) ---
+    for (const edge of candidates) {
+      if (activeKeys.has(edge.key)) continue;
 
       if (maxNeigh > 0) {
-        // ВАЖНО: mesh↔mesh не может превышать базовый лимит (резерв для MIS не тратим)
-        if (degrees[i] >= maxNeigh || degrees[j] >= maxNeigh) continue;
+        const isMeshMesh = !(edge.aIsMis || edge.bIsMis);
+        if (isMeshMesh) {
+          if (meshDegrees[edge.i] >= maxNeigh || meshDegrees[edge.j] >= maxNeigh) continue;
+        }
       }
-
-      activateEdge(e);
+      activateEdge(edge);
     }
 
-// Чистим "мертвые" линки (если отображение включено) (если отображение включено)
+    // --- Чистим "мертвые" линии визуализации ---
     if (radioState.drawLinks) {
       for (const [key, ent] of radioState.linksByKey.entries()) {
         if (!activeKeys.has(key)) {
@@ -1493,13 +1359,10 @@ function applyPhasedProfileToConfig(profileKey) {
     const avgDistKm = distSamples > 0 ? distSumKm / distSamples : NaN;
     radioState.lastAvgLinkDistKm = isFinite(avgDistKm) ? avgDistKm : 0;
 
-    // Сколько КА реально участвуют хотя бы в одном линке
+    // Статистика участия
     let activeSatCount = 0;
-    for (let i = 0; i < n; i++) {
-      if (degrees[i] > 0) activeSatCount++;
-    }
+    for (let i = 0; i < n; i++) if (degrees[i] > 0) activeSatCount++;
 
-    // Разделение: mesh-КА и КА заданий (MIS, только IDLE участвуют)
     let totalMeshSatCount = 0;
     let totalMisSatCount = 0;
     let activeMeshSatCount = 0;
@@ -1518,14 +1381,15 @@ function applyPhasedProfileToConfig(profileKey) {
       }
     }
 
-    const avgDegree =
-      activeSatCount > 0 ? (2 * linksCount) / activeSatCount : 0;
+    const avgDegree = activeSatCount > 0 ? (2 * linksCount) / activeSatCount : 0;
 
     if (linksCount === 0) {
       updateRadioMeshInfo(
         "Активных радиолинков нет (нет пар КА, удовлетворяющих LoS / RxSens / SNR)."
       );
       updateSingleLinkAndEnergySummary();
+      // обновим prev снимок (пустой)
+      radioState.prevActiveEdgesByKey = new Map(radioState.activeEdgesByKey);
       return;
     }
 
@@ -1533,19 +1397,21 @@ function applyPhasedProfileToConfig(profileKey) {
       `<b>Активных линков:</b> ${linksCount}<br/>
        <b>КА в сети (mesh):</b> ${activeMeshSatCount} из ${totalMeshSatCount}<br/>
        <b>КА в сети (задания/MIS):</b> ${activeMisSatCount} из ${totalMisSatCount}<br/>
-       <b>Средняя степень узла k:</b> ≈ ${avgDegree.toFixed(2)}<br/>
-       <b>Средняя дальность линка:</b> ≈ ${isFinite(avgDistKm) ? avgDistKm.toFixed(1) : "-"} км<br/>
+       <b>Среднее число линков на один КА:</b> ≈ ${avgDegree.toFixed(2)}<br/>
+       <b>Средняя дальность линка между КА:</b> ≈ ${isFinite(avgDistKm) ? avgDistKm.toFixed(1) : "-"} км<br/>
        <b>Оценочная суммарная пропускная способность сети:</b> ≈ ${isFinite(capacitySumMbps) ? capacitySumMbps.toFixed(1) : "-"} Мбит/с<br/>
        <b>SNR, dB:</b> min=${isFinite(snrMin) ? snrMin.toFixed(1) : "-"}, 
        avg=${isFinite(snrAvg) ? snrAvg.toFixed(1) : "-"}, 
        max=${isFinite(snrMax) ? snrMax.toFixed(1) : "-"}<br/>
-       <small>Обновление топологии каждые ${radioState.updatePeriodSec.toFixed(1)} с.</small>`
+       <small>Обновление топологии каждые ${radioState.updatePeriodSec.toFixed(1)} с. StickyBonus=${cfg.stickyBonus || 0}.</small>`
     );
 
-    // Обновляем single-link summary и энергетику с учётом новой средней дальности
     updateSingleLinkAndEnergySummary();
 
-    // Уведомление внешних модулей (tasking.js) о том, что топология обновилась.
+    // Сохраняем снимок на следующий тик
+    radioState.prevActiveEdgesByKey = new Map(radioState.activeEdgesByKey);
+
+    // Событие для внешних модулей
     try {
       window.dispatchEvent(new CustomEvent("spaceMesh:radioTick", {
         detail: {
@@ -1556,7 +1422,8 @@ function applyPhasedProfileToConfig(profileKey) {
       }));
     } catch {}
   });
-  // --- 13. Реакция на изменение топологии (орбиты/КА пересозданы/удалены) ---
+
+  // --- 13. Реакция на изменение топологии ---
   window.addEventListener("spaceMesh:topologyChanged", onTopologyChanged);
 })();
 

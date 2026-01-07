@@ -1,6 +1,4 @@
 // static/js/mission.js
-// Слой "КА заданий": отдельный missionStore, квадратные маркеры, участие в mesh через participatesInMesh.
-// НЕ зависит от window.createOrbit/... (потому что в app.js это не экспортируется в window).
 
 (function () {
   if (typeof Cesium === "undefined") {
@@ -8,7 +6,6 @@
     return;
   }
 
-  // --- База из app.js (экспортируется в window.spaceMesh) ---
   const sm = (window.spaceMesh = window.spaceMesh || {});
   const viewer = sm.viewer || window.viewer;
   const clock = sm.clock || (viewer ? viewer.clock : null);
@@ -20,23 +17,19 @@
     return;
   }
 
-  // --- Константы орбитальной динамики (как в app.js) ---
   const DEG2RAD = Math.PI / 180;
   const MU = 3.986004418e14; // м^3/с^2
   const T_SIDEREAL = 86164;  // сек
-  const OMEGA_E = (2 * Math.PI) / T_SIDEREAL; // рад/с
+  const OMEGA_E = (2 * Math.PI) / T_SIDEREAL;
 
-  // --- missionStore (важно: не переназначать, чтобы другие модули видели одну ссылку) ---
   const missionStore = sm.missionStore || [];
-  missionStore.length = missionStore.length; // no-op: оставляем ссылку
+  missionStore.length = missionStore.length; // сохранить ссылку
   sm.missionStore = missionStore;
 
   let missionIdCounter = sm._missionIdCounter || 0;
   sm._missionIdCounter = missionIdCounter;
 
-  // -------------------------
-  // UI: toggle панели (без inline script -> CSP-friendly)
-  // -------------------------
+  // UI: toggle
   const missionPanel = document.getElementById("mission-panel");
   const missionToggle = document.getElementById("mission-toggle");
 
@@ -47,13 +40,10 @@
     });
   }
 
-  // -------------------------
-  // Draggable (как ground-panel)
-  // -------------------------
+  // Draggable
   function makeDraggable(panelEl, handleEl, storageKey = "missionPanelPos") {
     if (!panelEl || !handleEl) return;
 
-    // restore pos
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
       if (saved && typeof saved.left === "number" && typeof saved.top === "number") {
@@ -122,9 +112,7 @@
     makeDraggable(missionPanel, handle, "missionPanelPos");
   }
 
-  // -------------------------
-  // Орбитальная математика (локальная копия логики app.js)
-  // -------------------------
+  // Орбитальная математика
   function computeOrbitDynamics(altitudeMeters) {
     const a = EARTH_RADIUS + altitudeMeters;
     const period = 2 * Math.PI * Math.sqrt(Math.pow(a, 3) / MU);
@@ -138,7 +126,6 @@
 
     const phaseStepDeg = options.phaseStepDeg || 0;
     const phaseStepRad = phaseStepDeg > 0 ? phaseStepDeg * DEG2RAD : null;
-
     const phaseOffsetRad = Math.random() * 2 * Math.PI;
 
     return {
@@ -213,9 +200,7 @@
     });
   }
 
-  // -------------------------
-  // Квадратный маркер (SVG data-uri)
-  // -------------------------
+  // Квадратный маркер
   function cesiumColorToCss(color) {
     const r = Math.round(color.red * 255);
     const g = Math.round(color.green * 255);
@@ -231,19 +216,16 @@
     return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   }
 
-// --- Генерация уникальных цветов для MIS-орбит (HSL + золотое сечение) ---
-function getMissionColorByIndex(index) {
-  const goldenRatio = 0.618033988749895;
-  const hue = (index * goldenRatio) % 1.0;
+  // Цвета MIS-орбит
+  function getMissionColorByIndex(index) {
+    const goldenRatio = 0.618033988749895;
+    const hue = (index * goldenRatio) % 1.0;
+    const saturation = 0.80;
+    const lightness  = 0.58;
+    return Cesium.Color.fromHsl(hue, saturation, lightness, 1.0);
+  }
 
-  // Чуть теплее/ярче, чтобы MIS-орбиты визуально отличались от обычных
-  const saturation = 0.80;
-  const lightness  = 0.58;
-
-  return Cesium.Color.fromHsl(hue, saturation, lightness, 1.0);
-}
-
-  function createMissionSatelliteOnOrbit(orbit, color, satIndex, totalSatellites, participatesInMesh) {
+  function createMissionSatelliteOnOrbit(orbit, color, satIndex, totalSatellites, participatesInMeshFlag) {
     let deltaThetaRad;
     if (orbit.evenSpacing || !orbit.phaseStepRad || orbit.phaseStepRad <= 0) {
       deltaThetaRad = totalSatellites > 0 ? (2 * Math.PI) / totalSatellites : 0;
@@ -277,8 +259,7 @@ function getMissionColorByIndex(index) {
       return Cesium.Cartesian3.fromElements(x, y, z, result);
     }, false);
 
-    // const fillCss = "#ff004c"; // яркий неоново-красный
-    const fillCss = cesiumColorToCss(color); // берём цвет миссионной орбиты
+    const fillCss = cesiumColorToCss(color);
     const img = makeSquareDataUri(fillCss);
 
     const ent = viewer.entities.add({
@@ -295,8 +276,11 @@ function getMissionColorByIndex(index) {
       properties: {
         isSatellite: true,
         isMissionSatellite: true,
-        participatesInMesh: new Cesium.ConstantProperty(!!participatesInMesh),
+
+        // ВАЖНО: unified mesh читает эти свойства
+        participatesInMesh: new Cesium.ConstantProperty(!!participatesInMeshFlag),
         state: new Cesium.ConstantProperty("IDLE"),
+
         missionRole: new Cesium.ConstantProperty("EO")
       }
     });
@@ -304,9 +288,7 @@ function getMissionColorByIndex(index) {
     return ent;
   }
 
-  // -------------------------
   // Создание миссий из формы
-  // -------------------------
   function safeNum(v, def, min = -Infinity, max = Infinity) {
     const x = parseFloat(v);
     if (!isFinite(x)) return def;
@@ -370,12 +352,10 @@ function getMissionColorByIndex(index) {
       if (g?.polylineEntity) viewer.entities.remove(g.polylineEntity);
       if (Array.isArray(g?.satellites)) g.satellites.forEach(ent => viewer.entities.remove(ent));
     }
-    missionStore.length = 0; // сохраняем ссылку
+    missionStore.length = 0;
   }
-  // -------------------------
-  // UI: список MIS-орбит и управление (как "Текущие орбиты")
-  // -------------------------
 
+  // UI: список MIS-орбит и управление
   const missionListEl = document.getElementById("mission-list");
   const deleteAllBtn = document.getElementById("mission-delete-all");
 
@@ -383,34 +363,26 @@ function getMissionColorByIndex(index) {
     window.dispatchEvent(new Event("spaceMesh:topologyChanged"));
   }
 
-  function formatKm(meters) {
-    return (meters / 1000).toFixed(0);
-  }
-
-  function formatDeg(rad) {
-    return (rad * 180 / Math.PI).toFixed(1);
-  }
+  function formatKm(meters) { return (meters / 1000).toFixed(0); }
+  function formatDeg(rad) { return (rad * 180 / Math.PI).toFixed(1); }
 
   function rebuildMissionSatellites(group, newCount) {
     if (!group || !group.orbit) return;
 
-    // remove old satellites
     if (Array.isArray(group.satellites)) {
       group.satellites.forEach(ent => viewer.entities.remove(ent));
     }
     group.satellites = [];
 
-    // update orbit count
     group.orbit.numSatellites = newCount;
 
-    // recreate satellites with consistent spacing
     for (let i = 0; i < newCount; i++) {
       const satEnt = createMissionSatelliteOnOrbit(
         group.orbit,
         group.color,
         i,
         newCount,
-        true // participatesInMesh (как у тебя сейчас)
+        true
       );
       group.satellites.push(satEnt);
     }
@@ -438,7 +410,7 @@ function getMissionColorByIndex(index) {
     if (!g || !g.orbit) return;
 
     const cur = Math.max(0, g.orbit.numSatellites || (g.satellites?.length || 0));
-    const next = Math.min(cur + 1, 2000); // safety cap
+    const next = Math.min(cur + 1, 2000);
     rebuildMissionSatellites(g, next);
   }
 
@@ -447,7 +419,7 @@ function getMissionColorByIndex(index) {
     if (!g || !g.orbit) return;
 
     const cur = Math.max(0, g.orbit.numSatellites || (g.satellites?.length || 0));
-    const next = Math.max(1, cur - 1); // минимум 1 КА, чтобы орбита не стала "пустой"
+    const next = Math.max(1, cur - 1);
     rebuildMissionSatellites(g, next);
   }
 
@@ -497,7 +469,6 @@ function getMissionColorByIndex(index) {
     });
   }
 
-  // Делегирование кликов по списку
   if (missionListEl) {
     missionListEl.addEventListener("click", (e) => {
       const btn = e.target.closest("button");
@@ -513,7 +484,6 @@ function getMissionColorByIndex(index) {
     });
   }
 
-  // Кнопка "удалить всё"
   if (deleteAllBtn) {
     deleteAllBtn.addEventListener("click", () => {
       deleteAllMissions();
@@ -522,7 +492,6 @@ function getMissionColorByIndex(index) {
     });
   }
 
-  // UI элементы
   const form = document.getElementById("mission-form");
   if (!form) {
     console.warn("mission.js: не найден #mission-form (панель миссий не добавлена).");
@@ -543,30 +512,32 @@ function getMissionColorByIndex(index) {
     const altitudeKm = safeNum(altEl ? altEl.value : 450, 450, 120, 2000);
     const inclinationDeg = safeNum(incEl ? incEl.value : 98, 98, 0, 180);
     const numSatellites = Math.max(1, Math.floor(safeNum(numEl ? numEl.value : 4, 4, 1, 500)));
-    const participatesInMesh = true;
 
     addMissionOrbitWithSatellites({
       name,
       altitudeKm,
       inclinationDeg,
       numSatellites,
-      participatesInMesh
+      participatesInMesh: true
     });
+
     renderMissionList();
     emitTopologyChanged();
 
-    console.log(`[mission] created orbit=${name}, h=${altitudeKm}km, i=${inclinationDeg}°, sats=${numSatellites}, mesh=${participatesInMesh}`);
+    console.log(`[mission] created orbit=${name}, h=${altitudeKm}km, i=${inclinationDeg}°, sats=${numSatellites}, mesh=true`);
   });
 
   if (clearBtn) {
     clearBtn.addEventListener("click", function () {
       deleteAllMissions();
+      emitTopologyChanged();
       console.log("[mission] all missions deleted");
+      renderMissionList();
     });
   }
+
   renderMissionList();
 
-  // Экспорт полезных функций
   sm.mission = sm.mission || {};
   sm.mission.deleteAll = deleteAllMissions;
   sm.mission.store = missionStore;
