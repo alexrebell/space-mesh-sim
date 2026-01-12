@@ -34,6 +34,38 @@
     return x >= rect.lonMin && x <= rect.lonMax;
   }
 
+  // -------------------------
+  // Гео-утилиты для "пятна съёмки" (простая модель)
+  // -------------------------
+  function deg2rad(d) { return d * Math.PI / 180; }
+
+  // Haversine distance, км
+  function haversineKm(lon1, lat1, lon2, lat2) {
+    const R = 6371.0;
+    const p1 = deg2rad(lat1);
+    const p2 = deg2rad(lat2);
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  function rectCenter(rect) {
+    return {
+      lon: (rect.lonMin + rect.lonMax) / 2,
+      lat: (rect.latMin + rect.latMax) / 2
+    };
+  }
+
+  // Приближённая минимальная дистанция (км) от точки до прямоугольника в lon/lat.
+  // Для наших задач (малые области, без пересечения 180°) этого достаточно.
+  function distancePointToRectKm(rect, lon, lat) {
+    const clampedLon = clamp(lon, rect.lonMin, rect.lonMax);
+    const clampedLat = clamp(lat, rect.latMin, rect.latMax);
+    return haversineKm(lon, lat, clampedLon, clampedLat);
+  }
+
   function setSatState(ent, stateStr) {
     try {
       if (!ent || !ent.properties || !ent.properties.state) return;
@@ -238,6 +270,41 @@
     `;
 
     panel.appendChild(block);
+  }
+
+  // -------------------------
+  // Imaging params UI (порог "доступной области съёмки")
+  // -------------------------
+  function ensureImagingUi() {
+    const panel = $("tasking-panel");
+    if (!panel) return;
+    if ($("tasking-imaging-block")) return;
+
+    const block = document.createElement("div");
+    block.id = "tasking-imaging-block";
+    block.className = "hint";
+    block.style.marginTop = "10px";
+    block.innerHTML = `
+      <h2 style="margin:10px 0 6px;">Параметры съёмки (упрощённо)</h2>
+      <div class="row" style="gap:8px;">
+        <label style="width:100%;">Радиус покрытия (км):
+          <input id="tasking-footprint-km" type="number" value="80" min="1" max="2000" step="1" />
+        </label>
+        <label style="width:100%;">Шаг поиска (сек):
+          <input id="tasking-search-step" type="number" value="15" min="1" max="120" step="1" />
+        </label>
+      </div>
+      <div style="font-size:12px; opacity:.85; line-height:1.35;">
+        Если прямоугольник маленький — MIS-КА считается подходящим, когда его подспутниковая точка
+        попадает <b>внутрь</b> области <i>или</i> оказывается не дальше указанного радиуса от неё.
+        Это имитация полосы/пятна съёмки (без оптики, без угла отклонения, без облачности).
+      </div>
+    `;
+
+    // вставляем перед блоком маршрутизации, чтобы логически было сверху
+    const routing = $("tasking-routing-block");
+    if (routing && routing.parentNode) routing.parentNode.insertBefore(block, routing);
+    else panel.appendChild(block);
   }
 
   function elevationDeg(gsPos, satPos) {
@@ -555,7 +622,8 @@
 
     const t0 = nowJulian(clock);
     const horizonSec = 15 * 60;
-    const stepSec = 15; // компромисс: быстро и достаточно
+    const stepSec = clamp(parseInt($("tasking-search-step")?.value || "15", 10) || 15, 1, 120);
+    const footprintKm = clamp(parseFloat($("tasking-footprint-km")?.value || "80") || 80, 0, 2000);
     const sats = getMissionSats(t0);
 
     let best = null; // {sat, etaSec}
@@ -570,9 +638,14 @@
         const pos = sat.position?.getValue?.(tt);
         if (!pos) continue;
         const ll = cartesianToLonLat(pos);
-        if (rectContains(rect, ll.lon, ll.lat)) {
+        // Критерий подхода к области:
+        // 1) точка внутри прямоугольника, ИЛИ
+        // 2) точка в пределах "радиуса покрытия" от прямоугольника
+        const inside = rectContains(rect, ll.lon, ll.lat);
+        const distKm = inside ? 0 : distancePointToRectKm(rect, ll.lon, ll.lat);
+        if (inside || distKm <= footprintKm) {
           if (!best || dt < best.etaSec) {
-            best = { sat, etaSec: dt };
+            best = { sat, etaSec: dt, distKm };
           }
           break;
         }
@@ -582,11 +655,13 @@
     return best;
   }
 
-  function updateChosenUi(ent, etaSec) {
+  function updateChosenUi(ent, etaSec, distKm) {
     const time = nowJulian(getClock());
     const name = ent?.name || ent?.id || "—";
     $("tasking-mis-chosen").textContent = name;
-    $("tasking-mis-eta").textContent = Number.isFinite(etaSec) ? `${Math.round(etaSec)} с` : "—";
+    const etaStr = Number.isFinite(etaSec) ? `${Math.round(etaSec)} с` : "—";
+    const distStr = Number.isFinite(distKm) ? `, Δ≈${distKm.toFixed(1)} км` : "";
+    $("tasking-mis-eta").textContent = etaStr + distStr;
     $("tasking-status").textContent = "ГОТОВО К ОТПРАВКЕ";
   }
 
@@ -901,11 +976,12 @@
       }
 
       tasking.chosenMisId = best.sat.id;
-      updateChosenUi(best.sat, best.etaSec);
+      updateChosenUi(best.sat, best.etaSec, best.distKm);
     });
 
-    // Routing UI + events
+    // Imaging + Routing UI + events
     ensureRoutingUi();
+    ensureImagingUi();
     $("tasking-build-routes")?.addEventListener("click", (e) => {
       e.preventDefault();
       buildAndRenderRoutesSnapshot();
