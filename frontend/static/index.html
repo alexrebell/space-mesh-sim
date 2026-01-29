@@ -43,12 +43,12 @@
 
     <label>
       Наклонение, °:
-      <input id="mission-inclination" type="number" value="55"/>
+      <input id="mission-inclination" type="number" value="61"/>
     </label>
 
     <label>
       Количество КА:
-      <input id="mission-num-sats" type="number" value="10" min="1"/>
+      <input id="mission-num-sats" type="number" value="20" min="1"/>
     </label>
     <button type="submit">➕ Создать КА заданий</button>
   </form>
@@ -247,6 +247,11 @@
     <div><b>Орбита:</b> <span id="tasking-gb-mis-orbit">—</span></div>
     <div><b>ETA до области:</b> <span id="tasking-gb-mis-eta">—</span></div>
   </div>
+
+<button id="tasking-gb-reset-mis" type="button" style="margin-top:6px; background:#666;">
+  Сброс исполнителя
+</button>
+
 
   <button id="tasking-gb-send" type="button" style="margin-top:8px; background:#28a745;">Отправить задание ГБ</button>
 

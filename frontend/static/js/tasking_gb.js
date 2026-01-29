@@ -1,7 +1,4 @@
 // tasking_gb.js — панель "Задание ГБ" (uplink+downlink маршруты, оценка времени передачи)
-// + Радиус съёмки 0–300 км (0 = строго над областью)
-// + Визуализация буферной зоны (если радиус > 0)
-// + Под "Выбран:" показываем "Орбита:" выбранного MIS
 
 (function () {
   "use strict";
@@ -166,6 +163,54 @@
     return v ? v.entities.getById(id) : null;
   }
 
+  // -------------------------
+  // NEW: highlight выбранного MIS-КА
+  // -------------------------
+  function clearMisHighlight() {
+    const v = getViewer();
+    if (!v) return;
+    const h = v.entities.getById(gb.misHighlightId);
+    if (h) v.entities.remove(h);
+  }
+
+  function setMisHighlight(misId, { flyTo = false } = {}) {
+    const v = getViewer();
+    if (!v) return;
+
+    if (!misId) {
+      clearMisHighlight();
+      return;
+    }
+
+    const target = getEntityById(misId);
+    if (!target || !target.position) return;
+
+    let h = v.entities.getById(gb.misHighlightId);
+    if (!h) {
+      h = v.entities.add({
+        id: gb.misHighlightId,
+        name: "Выбранный MIS-КА (подсветка)",
+        position: target.position, // привязка к Property → маркер следует за КА
+        point: {
+          pixelSize: 18,
+          color: Cesium.Color.YELLOW.withAlpha(0.85),
+          outlineColor: Cesium.Color.BLACK.withAlpha(0.8),
+          outlineWidth: 3,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    } else {
+      h.position = target.position;
+    }
+
+    // Дополнительно: подсветка через стандартный selectedEntity (InfoBox/выделение)
+    // v.selectedEntity = target;
+
+    if (flyTo && typeof v.flyTo === "function") {
+      v.flyTo(target, { duration: 1.0 });
+    }
+  }
+
   // Найти имя орбиты, к которой принадлежит выбранный MIS
   function findOrbitNameForMisId(misId) {
     const store = getMissionStore();
@@ -192,6 +237,9 @@
 
     uplinkRouteId: "TASKING_GB:UPLINK_ROUTE",
     downlinkRouteId: "TASKING_GB:DOWNLINK_ROUTE",
+
+    // NEW
+    misHighlightId: "TASKING_GB:SELECTED_MIS_HIGHLIGHT",
 
     chosenMisId: null,
 
@@ -1015,11 +1063,18 @@
         if (st) st.textContent = "Не найден подходящий MIS-КА.";
         gb.chosenMisId = null;
         updateChosenUi(null, null);
+
+        // NEW: убрать подсветку
+        setMisHighlight(null);
+
         return;
       }
 
       gb.chosenMisId = best.sat.id;
       updateChosenUi(best.sat.id, best.etaSec);
+
+      // NEW: подсветить выбранный MIS
+      setMisHighlight(best.sat.id);
 
       const rKm = getImagingRadiusKm();
       if (st) st.textContent = rKm > 0
@@ -1060,6 +1115,38 @@
 
     // Если область уже есть (например, после hot-reload) — перерисуем
     if (gb.targetRect) drawOrUpdateRect(gb.targetRect);
+$("tasking-gb-reset-mis")?.addEventListener("click", (e) => {
+  e.preventDefault();
+
+  gb.chosenMisId = null;
+
+  // очистить UI выбранного MIS
+  updateChosenUi(null, null);
+
+  // убрать подсветку
+  setMisHighlight(null);
+
+  // убрать маршруты uplink/downlink с карты
+  clearRouteEntities();
+
+  // сбросить статусы/поля расчётов
+  $("tasking-gb-status") && ($("tasking-gb-status").textContent = "Исполнитель сброшен.");
+  $("tasking-gb-uplink-status") && ($("tasking-gb-uplink-status").textContent = "—");
+  $("tasking-gb-downlink-status") && ($("tasking-gb-downlink-status").textContent = "—");
+  $("tasking-gb-uplink-bottleneck") && ($("tasking-gb-uplink-bottleneck").textContent = "—");
+  $("tasking-gb-downlink-bottleneck") && ($("tasking-gb-downlink-bottleneck").textContent = "—");
+  $("tasking-gb-est-time") && ($("tasking-gb-est-time").textContent = "—");
+
+  // сбросить кэш последнего маршрута
+  gb.lastUplinkGsId = null;
+  gb.lastDownlinkGsId = null;
+  gb.lastUplinkRoute = null;
+  gb.lastDownlinkRoute = null;
+  gb.lastBottleneckUplinkMbps = null;
+  gb.lastBottleneckDownlinkMbps = null;
+});
+
+
   }
 
   if (document.readyState === "loading") {
