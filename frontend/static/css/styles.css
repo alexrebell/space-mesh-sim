@@ -471,3 +471,31 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   right: auto;        /* чтобы draggable не тянуло вправо */
   bottom: auto;
 }
+
+
+/* Панель "Задание ГБ" — по стилю как "Задания", но смещена вправо */
+#tasking-gb-panel {
+  top: 45px;
+  left: 420px;       /* чтобы не перекрывать tasking-panel */
+  width: 400px;
+  max-height: 75vh;
+  overflow-y: auto;
+
+  right: auto;
+  bottom: auto;
+}
+
+/* заголовок = “ручка” для перетаскивания */
+#tasking-gb-panel h1 {
+  cursor: move;
+  user-select: none;
+}
+
+/* ===== Задание ГБ: цветовые акценты ===== */
+#tasking-gb-panel .hint { color: #eaeaea; }     /* базовый текст */
+#tasking-gb-panel b { color: #00f6ff; }         /* как в других твоих блоках */
+
+#tasking-gb-panel .gb-ok   { color: #58d68d; }  /* зелёный */
+#tasking-gb-panel .gb-warn { color: #f4d03f; }  /* жёлтый */
+#tasking-gb-panel .gb-bad  { color: #ff6b6b; }  /* красный мягкий */
+#tasking-gb-panel .gb-dim  { color: #aab7b8; }  /* серый */

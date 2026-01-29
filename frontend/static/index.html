@@ -22,6 +22,7 @@
   <div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
   <div id="mission-toggle" class="orbit-toggle-btn">▼ КА заданий</div>
   <div id="tasking-toggle" class="orbit-toggle-btn">▼ Задания</div>
+  <div id="tasking-gb-toggle" class="orbit-toggle-btn">▼ Задание ГБ</div>
 </div>
 
   <!-- Панель управления -->
@@ -92,21 +93,21 @@
   <div class="row">
     <label style="width:100%;">
       Lon min:
-      <input id="tasking-lon-min" type="number" step="0.001" value="37.500" />
+      <input id="tasking-lon-min" type="number" step="0.001" value="37.20" />
     </label>
     <label style="width:100%;">
       Lon max:
-      <input id="tasking-lon-max" type="number" step="0.001" value="37.900" />
+      <input id="tasking-lon-max" type="number" step="0.001" value="38.10" />
     </label>
   </div>
   <div class="row">
     <label style="width:100%;">
       Lat min:
-      <input id="tasking-lat-min" type="number" step="0.001" value="55.600" />
+      <input id="tasking-lat-min" type="number" step="0.001" value="48.55" />
     </label>
     <label style="width:100%;">
       Lat max:
-      <input id="tasking-lat-max" type="number" step="0.001" value="55.900" />
+      <input id="tasking-lat-max" type="number" step="0.001" value="49.05" />
     </label>
   </div>
 
@@ -159,6 +160,111 @@
   </div>
 </div>
 
+<!-- Левая панель: Задание ГБ -->
+<div id="tasking-gb-panel" class="overlay-panel hidden">
+  <h1>Задание ГБ</h1>
+
+  <h2 style="margin:8px 0 6px;">Отправитель</h2>
+  <label>
+    Режим наземной станции:
+    <select id="tasking-gb-gs-mode">
+      <option value="auto" selected>Автоматически (лучшие условия)</option>
+      <option value="manual">Выбрать вручную</option>
+    </select>
+  </label>
+
+  <div id="tasking-gb-gs-auto" style="margin-top:6px;">
+    <label>
+      Станция отправителя (uplink):
+      <select id="tasking-gb-gs-uplink"></select>
+    </label>
+
+    <label style="margin-top:6px;">
+      Результат отправить на ту же станцию:
+      <input id="tasking-gb-same-gs" type="checkbox" checked />
+    </label>
+
+    <div class="hint" style="margin-top:6px;">
+      В авто-режиме downlink будет на ту же станцию (если чекбокс включён) либо на наиболее выгодную станцию (если выключен).
+    </div>
+  </div>
+
+  <div id="tasking-gb-gs-manual" style="margin-top:6px; display:none;">
+    <label>
+      Станция отправителя (uplink):
+      <select id="tasking-gb-gs-uplink-manual"></select>
+    </label>
+    <label style="margin-top:6px;">
+      Станция получателя (downlink):
+      <select id="tasking-gb-gs-downlink-manual"></select>
+    </label>
+  </div>
+
+  <button id="tasking-gb-refresh-gs" type="button" style="margin-top:6px;">↻ Обновить список станций</button>
+
+  <h2 style="margin:10px 0 6px;">Целевая область (координаты)</h2>
+  <div class="row">
+    <label style="width:100%;">
+      Lon min:
+      <input id="tasking-gb-lon-min" type="number" step="0.001" value="37.20" />
+    </label>
+    <label style="width:100%;">
+      Lon max:
+      <input id="tasking-gb-lon-max" type="number" step="0.001" value="38.10" />
+    </label>
+  </div>
+  <div class="row">
+    <label style="width:100%;">
+      Lat min:
+      <input id="tasking-gb-lat-min" type="number" step="0.001" value="48.55" />
+    </label>
+    <label style="width:100%;">
+      Lat max:
+      <input id="tasking-gb-lat-max" type="number" step="0.001" value="49.05" />
+    </label>
+  </div>
+
+  <button id="tasking-gb-apply-rect" type="button" style="margin-top:6px;">Применить область</button>
+  <button id="tasking-gb-clear-rect" type="button" style="margin-top:6px; background:#666;">Очистить область</button>
+
+  <div class="hint" style="margin-top:8px;">
+    <div><b>Статус области:</b> <span id="tasking-gb-target-status">—</span></div>
+  </div>
+
+  <h2 style="margin:10px 0 6px;">Размер данных</h2>
+  <label>
+    Размер снимка, МБ:
+    <input id="tasking-gb-size-mb" type="number" min="1" step="1" value="10240" />
+  </label>
+  <div class="hint">
+    10240 МБ ≈ 10 ГБ. Время передачи будет оценено по пропускной способности маршрута (узкое место).
+  </div>
+
+  <h2 style="margin:10px 0 6px;">Исполнитель (MIS-КА)</h2>
+  <button id="tasking-gb-pick-mis" type="button">Подобрать исполнителя</button>
+  <div class="hint" style="margin-top:8px;">
+    <div><b>Выбран:</b> <span id="tasking-gb-mis-chosen">—</span></div>
+    <div><b>Орбита:</b> <span id="tasking-gb-mis-orbit">—</span></div>
+    <div><b>ETA до области:</b> <span id="tasking-gb-mis-eta">—</span></div>
+  </div>
+
+  <button id="tasking-gb-send" type="button" style="margin-top:8px; background:#28a745;">Отправить задание ГБ</button>
+
+  <div class="hint" style="margin-top:10px;">
+    <div><b>Состояние:</b> <span id="tasking-gb-status">—</span></div>
+    <div><b>Uplink маршрут:</b> <span id="tasking-gb-uplink-status">—</span></div>
+    <div><b>Downlink маршрут:</b> <span id="tasking-gb-downlink-status">—</span></div>
+    <div style="margin-top:6px; opacity:.85;">
+      <div><b>Узкое место uplink:</b> <span id="tasking-gb-uplink-bottleneck">—</span></div>
+      <div><b>Узкое место downlink:</b> <span id="tasking-gb-downlink-bottleneck">—</span></div>
+      <div><b>Оценка времени передачи:</b> <span id="tasking-gb-est-time">—</span></div>
+    </div>
+  </div>
+
+  <div class="hint" style="margin-top:10px;">
+    Маршруты uplink/downlink и расчёты будут строиться на базе активных линков из radio.js, без участия других MIS-КА.
+  </div>
+</div>
 
   <div id="orbit-panel" class="overlay-panel">
       <h1>Орбиты и КА</h1>
@@ -663,5 +769,6 @@
   <script src="/static/js/radio.js"></script>
   <script src="/static/js/geo_utils.js"></script>
   <script src="/static/js/tasking.js"></script>
+  <script src="/static/js/tasking_gb.js"></script>
 </body>
 </html>

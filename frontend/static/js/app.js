@@ -54,8 +54,10 @@ const clock = viewer.clock;
 const start = Cesium.JulianDate.now();
 clock.startTime = start.clone();
 clock.currentTime = start.clone();
-clock.clockRange = Cesium.ClockRange.LOOP_STOP;
-clock.multiplier = 50; // ×50 ускорение
+clock.clockRange = Cesium.ClockRange.UNBOUNDED;
+clock.multiplier = 1; // ×50 ускорение
+clock.shouldAnimate = true;
+
 
 // --- 2. Константы и полезные функции ---
 const EARTH_RADIUS = 6371e3; // м
