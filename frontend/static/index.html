@@ -21,12 +21,12 @@
 <div id="top-left-buttons" class="top-left-buttons">
   <div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
   <div id="mission-toggle" class="orbit-toggle-btn">▼ КА заданий</div>
-  <div id="tasking-toggle" class="orbit-toggle-btn">▼ Задания</div>
+<!--?  <div id="tasking-toggle" class="orbit-toggle-btn">▼ Задания</div>-->
   <div id="tasking-gb-toggle" class="orbit-toggle-btn">▼ Задание ГБ</div>
 </div>
 
   <!-- Панель управления -->
-<!-- Левая панель: КА заданий -->
+<<!-- Левая панель: КА заданий -->
 <div id="mission-panel" class="overlay-panel hidden">
   <h1>КА заданий</h1>
 
@@ -50,15 +50,72 @@
       Количество КА:
       <input id="mission-num-sats" type="number" value="20" min="1"/>
     </label>
+
     <button type="submit">➕ Создать КА заданий</button>
   </form>
 
   <div class="hint">
     КА заданий — отдельный слой, могут временно отключаться от mesh.
   </div>
+
+  <!-- СПОЙЛЕР: массовое создание MIS-орбит -->
+  <details class="bulk-orbits-panel" style="margin-top:8px;">
+    <summary>🌐Создать массив орбит</summary>
+
+    <form id="mission-bulk-orbits-form">
+      <label>
+        Высота орбит, км:
+        <input id="mission-bulk-altitude" type="number" value="450" />
+      </label>
+
+      <label>
+        Количество КА на каждой орбите:
+        <input id="mission-bulk-num-sats" type="number" value="20" min="1" />
+      </label>
+
+      <label>
+        Равномерно распределить КА по орбите:
+        <input id="mission-bulk-even-spacing" type="checkbox" checked />
+      </label>
+
+      <label>
+        Фазовый шаг между КА, °:
+        <input id="mission-bulk-phase-step" type="number" value="0" min="0" max="360" />
+        <small>(используется, если равномерное распределение отключено)</small>
+      </label>
+
+      <label>
+        Количество орбит:
+        <input id="mission-bulk-num-orbits" type="number" value="15" min="1" step="1" />
+      </label>
+
+      <div id="mission-bulk-incl-info" style="font-size:10px; color:#aaa; margin-top:4px;">
+        Шаг наклонения: —
+      </div>
+
+      <label>
+        Исключить полярные орбиты (90°):
+        <input id="mission-bulk-skip-polar" type="checkbox" checked />
+      </label>
+
+      <button type="submit">🚀 Создать массив MIS-орбит</button>
+    </form>
+  </details>
+
+  <!-- Список миссионных орбит (MIS) -->
+  <div id="mission-list-container" style="margin-top:10px;">
+    <h2 style="margin:8px 0;">Текущие орбиты</h2>
+    <ul id="mission-list"></ul>
+
+    <button id="mission-delete-all" type="button" style="background:#d9534f; margin-top:6px;">
+      🗑 Удалить все MIS-орбиты и КА
+    </button>
+  </div>
+</div>
+
     <!-- Список миссионных орбит (MIS) -->
     <div id="mission-list-container" style="margin-top:10px;">
-        <h2 style="margin:8px 0;">Текущие орбиты (MIS)</h2>
+        <h2 style="margin:8px 0;">Текущие орбиты</h2>
         <ul id="mission-list"></ul>
 
         <button id="mission-delete-all" type="button" style="background:#d9534f; margin-top:6px;">
@@ -253,16 +310,20 @@
 </button>
 
 
-  <button id="tasking-gb-send" type="button" style="margin-top:8px; background:#28a745;">Отправить задание ГБ</button>
+  <button id="tasking-gb-send" type="button" style="margin-top:8px; background:#28a745;">Отправить задание</button>
 
   <div class="hint" style="margin-top:10px;">
-    <div><b>Состояние:</b> <span id="tasking-gb-status">—</span></div>
-    <div><b>Uplink маршрут:</b> <span id="tasking-gb-uplink-status">—</span></div>
-    <div><b>Downlink маршрут:</b> <span id="tasking-gb-downlink-status">—</span></div>
-    <div style="margin-top:6px; opacity:.85;">
-      <div><b>Узкое место uplink:</b> <span id="tasking-gb-uplink-bottleneck">—</span></div>
-      <div><b>Узкое место downlink:</b> <span id="tasking-gb-downlink-bottleneck">—</span></div>
-      <div><b>Оценка времени передачи:</b> <span id="tasking-gb-est-time">—</span></div>
+      <div><b>Статус миссии:</b> <span id="tasking-gb-mission-status">—</span></div>
+      <div><b>Uplink (передача):</b> <span id="tasking-gb-uplink-xfer">—</span></div>
+      <div><b>Downlink (передача):</b> <span id="tasking-gb-downlink-xfer">—</span></div>
+      <div><b>Станция Uplink:</b> <span id="tasking-gb-station-uplink">—</span></div>
+      <div><b>Станция Downlink:</b> <span id="tasking-gb-station-downlink">—</span></div>
+      <div><b>Uplink маршрут:</b> <span id="tasking-gb-uplink-status">—</span></div>
+      <div><b>Downlink маршрут:</b> <span id="tasking-gb-downlink-status">—</span></div>
+      <div style="margin-top:6px; opacity:.85;">
+          <div><b>Узкое место uplink:</b> <span id="tasking-gb-uplink-bottleneck">—</span></div>
+          <div><b>Узкое место downlink:</b> <span id="tasking-gb-downlink-bottleneck">—</span></div>
+          <div><b>Оценка времени передачи:</b> <span id="tasking-gb-est-time">—</span></div>
     </div>
   </div>
 
@@ -773,7 +834,7 @@
   <script src="/static/js/mission.js"></script>
   <script src="/static/js/radio.js"></script>
   <script src="/static/js/geo_utils.js"></script>
-  <script src="/static/js/tasking.js"></script>
+<!--?  <script src="/static/js/tasking.js"></script>-->
   <script src="/static/js/tasking_gb.js"></script>
 </body>
 </html>

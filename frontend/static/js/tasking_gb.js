@@ -1,4 +1,7 @@
 // tasking_gb.js — панель "Задание ГБ" (uplink+downlink маршруты, оценка времени передачи)
+// + Радиус съёмки 0–300 км (0 = строго над областью)
+// + Визуализация буферной зоны (если радиус > 0)
+// + Под "Выбран:" показываем "Орбита:" выбранного MIS
 
 (function () {
   "use strict";
@@ -163,54 +166,6 @@
     return v ? v.entities.getById(id) : null;
   }
 
-  // -------------------------
-  // NEW: highlight выбранного MIS-КА
-  // -------------------------
-  function clearMisHighlight() {
-    const v = getViewer();
-    if (!v) return;
-    const h = v.entities.getById(gb.misHighlightId);
-    if (h) v.entities.remove(h);
-  }
-
-  function setMisHighlight(misId, { flyTo = false } = {}) {
-    const v = getViewer();
-    if (!v) return;
-
-    if (!misId) {
-      clearMisHighlight();
-      return;
-    }
-
-    const target = getEntityById(misId);
-    if (!target || !target.position) return;
-
-    let h = v.entities.getById(gb.misHighlightId);
-    if (!h) {
-      h = v.entities.add({
-        id: gb.misHighlightId,
-        name: "Выбранный MIS-КА (подсветка)",
-        position: target.position, // привязка к Property → маркер следует за КА
-        point: {
-          pixelSize: 18,
-          color: Cesium.Color.YELLOW.withAlpha(0.85),
-          outlineColor: Cesium.Color.BLACK.withAlpha(0.8),
-          outlineWidth: 3,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-      });
-    } else {
-      h.position = target.position;
-    }
-
-    // Дополнительно: подсветка через стандартный selectedEntity (InfoBox/выделение)
-    // v.selectedEntity = target;
-
-    if (flyTo && typeof v.flyTo === "function") {
-      v.flyTo(target, { duration: 1.0 });
-    }
-  }
-
   // Найти имя орбиты, к которой принадлежит выбранный MIS
   function findOrbitNameForMisId(misId) {
     const store = getMissionStore();
@@ -225,6 +180,44 @@
     return "—";
   }
 
+  function clearMisHighlight() {
+  const v = getViewer();
+  if (!v) return;
+  const h = v.entities.getById(gb.misHighlightId);
+  if (h) v.entities.remove(h);
+}
+
+function setMisHighlight(misId) {
+  const v = getViewer();
+  if (!v) return;
+
+  if (!misId) {
+    clearMisHighlight();
+    return;
+  }
+
+  const target = getEntityById(misId);
+  if (!target || !target.position) return;
+
+  let h = v.entities.getById(gb.misHighlightId);
+  if (!h) {
+    h = v.entities.add({
+      id: gb.misHighlightId,
+      name: "Выбранный MIS-КА (подсветка)",
+      position: target.position,
+      point: {
+        pixelSize: 18,
+        color: Cesium.Color.YELLOW.withAlpha(0.85),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.8),
+        outlineWidth: 3,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+  } else {
+    h.position = target.position;
+  }
+}
+
   // -------------------------
   // UI state
   // -------------------------
@@ -235,13 +228,14 @@
     targetEntityId: "TASKING_GB:TARGET_RECT",
     bufferEntityId: "TASKING_GB:TARGET_BUFFER_RECT",
 
-    uplinkRouteId: "TASKING_GB:UPLINK_ROUTE",
-    downlinkRouteId: "TASKING_GB:DOWNLINK_ROUTE",
+    // Линии маршрутов (префиксы используются для набора сегментов)
+    uplinkRoutePrefix: "TASKING_GB:UPLINK_ROUTE:",
+    downlinkRoutePrefix: "TASKING_GB:DOWNLINK_ROUTE:",
 
-    // NEW
     misHighlightId: "TASKING_GB:SELECTED_MIS_HIGHLIGHT",
 
     chosenMisId: null,
+    chosenEtaSec: null,
 
     lastUplinkGsId: null,
     lastDownlinkGsId: null,
@@ -249,6 +243,14 @@
     lastDownlinkRoute: null,
     lastBottleneckUplinkMbps: null,
     lastBottleneckDownlinkMbps: null,
+    lastStationText: "—",
+
+    // Сценарий (uplink → ожидание области → съёмка → downlink)
+    task: null,
+    taskTimer: null,
+
+    // защита от двойного навешивания обработчиков
+    _resetBound: false,
   };
 
   // -------------------------
@@ -617,7 +619,7 @@
   }
 
   // -------------------------
-  // Radio routing
+  // Radio routing (используем активные sat↔sat рёбра из radio.js + добавляем GS↔sat рёбра)
   // -------------------------
   function getRadio() {
     return window.spaceMesh?.radio || null;
@@ -625,101 +627,201 @@
 
   function getEdgesSnapshot() {
     const r = getRadio();
-    if (!r || typeof r.getActiveEdgesSnapshot !== "function") return null;
-    return r.getActiveEdgesSnapshot();
+    if (!r || typeof r.getActiveEdgesSnapshot !== "function") return [];
+    // radio.js возвращает МАССИВ активных рёбер (не объект)
+    return r.getActiveEdgesSnapshot() || [];
   }
 
-  function routeWeight(edgeInfo) {
-    const cap = Math.max(0.0001, edgeInfo.capacityMbps || 0.0001);
-    return 1.0 / cap;
+  function getOrbitStore() {
+    return window.spaceMesh?.orbitStore || window.spaceMesh?.orbits || [];
   }
 
-  function buildGraphSnapshot(excludeOtherMis, allowedMisId) {
-    const time = nowJulian(getClock());
+  function getMeshSats(time) {
+    const list = [];
+    const store = getOrbitStore();
+    for (const orbit of store) {
+      for (const sat of (orbit.satellites || [])) {
+        if (!sat) continue;
+        const isMis = sat?.properties?.isMissionSatellite?.getValue?.(time);
+        if (isMis) continue;
+        list.push(sat);
+      }
+    }
+    return list;
+  }
 
-    const snap = getEdgesSnapshot();
-    if (!snap || !Array.isArray(snap.edges)) return null;
+  function elevationDeg(gsPos, satPos) {
+    // копия логики из tasking.js: угол места над горизонтом для GS→sat
+    const m = Cesium.Transforms.eastNorthUpToFixedFrame(gsPos);
+    const inv = Cesium.Matrix4.inverse(m, new Cesium.Matrix4());
+    const satLocal = Cesium.Matrix4.multiplyByPoint(inv, satPos, new Cesium.Cartesian3());
 
-    const g = new Map();
-    const addEdge = (a, b, info) => {
-      if (!g.has(a)) g.set(a, []);
-      g.get(a).push({ to: b, info });
+    // satLocal: x=east, y=north, z=up
+    const x = satLocal.x, y = satLocal.y, z = satLocal.z;
+    const horiz = Math.sqrt(x * x + y * y);
+    const el = Math.atan2(z, horiz);
+    return Cesium.Math.toDegrees(el);
+  }
+
+  /**
+   * Собираем граф на текущий момент времени.
+   * - sat↔sat: из radio.getActiveEdgesSnapshot()
+   * - GS↔sat: добавляем вручную по LOS/углу места, только к mesh-КА (НЕ к MIS)
+   * - excludeOtherMis: выкидываем все MIS кроме allowedMisId
+   */
+  function buildGraphSnapshot(time, gsEnt, excludeOtherMis, allowedMisId) {
+    const radio = getRadio();
+    const viewer = getViewer();
+    if (!radio || !viewer) return null;
+
+    const cfg = radio.getConfig?.() || {};
+    const minSnr = cfg.minSnrDb ?? 5;
+    const rxSens = cfg.rxSensDbm ?? -100;
+    const maxRangeKm = cfg.maxRangeKm ?? 0;
+
+    /** @type {Map<string, Array<{to:string, edge:any}>>} */
+    const adj = new Map();
+    const addEdge = (from, to, edge) => {
+      if (!adj.has(from)) adj.set(from, []);
+      adj.get(from).push({ to, edge });
     };
 
-    function isExcludedMisNode(nodeId) {
+    const isExcludedMisNode = (nodeId) => {
       if (!excludeOtherMis) return false;
       if (!nodeId) return false;
       const ent = getEntityById(nodeId);
       if (!ent) return false;
-
       const isMis = isMissionSat(ent, time);
       if (!isMis) return false;
-
       return nodeId !== allowedMisId;
-    }
+    };
 
-    const radio = getRadio();
+    // 1) sat↔sat рёбра из radio.js
+    const edges = getEdgesSnapshot();
+    for (const e of edges) {
+      if (!e || !e.aId || !e.bId) continue;
 
-    for (const e of snap.edges) {
-      const a = e.aId;
-      const b = e.bId;
-      if (!a || !b) continue;
+      // normalize имён полей
+      const distKm = (e.distanceKm ?? e.distKm);
+      const snrDb = e.snrDb ?? null;
+      const rxPowerDbm = e.rxPowerDbm ?? null;
 
+      if (maxRangeKm > 0 && Number.isFinite(distKm) && distKm > maxRangeKm) continue;
+      if (Number.isFinite(snrDb) && snrDb < minSnr) continue;
+      if (Number.isFinite(rxPowerDbm) && rxPowerDbm < rxSens) continue;
+
+      const a = e.aId, b = e.bId;
       if (isExcludedMisNode(a) || isExcludedMisNode(b)) continue;
 
-      const distKm = e.distKm ?? null;
-      const snrDb = e.snrDb ?? null;
-
-      let cap = e.capacityMbps ?? null;
-      if (cap == null && radio && typeof radio.computeCapacityMbps === "function") {
-        cap = radio.computeCapacityMbps(snrDb);
+      let capMbps = e.capacityMbps ?? null;
+      if (capMbps == null && typeof radio.computeCapacityMbps === "function" && Number.isFinite(snrDb)) {
+        capMbps = radio.computeCapacityMbps(snrDb);
       }
-      cap = (Number.isFinite(cap) ? cap : 0);
+      capMbps = Number.isFinite(capMbps) ? capMbps : 0;
 
-      const info = { distKm, snrDb, capacityMbps: cap };
-      info.weight = routeWeight(info);
+      const edge = {
+        kind: "sat",
+        aId: a,
+        bId: b,
+        distanceKm: Number.isFinite(distKm) ? distKm : null,
+        snrDb: Number.isFinite(snrDb) ? snrDb : null,
+        rxPowerDbm: Number.isFinite(rxPowerDbm) ? rxPowerDbm : null,
+        capacityMbps: capMbps
+      };
 
-      addEdge(a, b, info);
-      addEdge(b, a, info);
+      addEdge(a, b, edge);
+      addEdge(b, a, edge);
     }
 
-    return { g, time };
+    // 2) GS↔sat рёбра
+    if (gsEnt) {
+      const gsPos = gsEnt.position?.getValue?.(time);
+      const minEl = gsEnt.properties?.minElevationDeg?.getValue?.(time) ?? 10;
+      if (gsPos) {
+        const meshSats = getMeshSats(time);
+        for (const sat of meshSats) {
+          const satPos = sat.position?.getValue?.(time);
+          if (!satPos) continue;
+
+          const el = elevationDeg(gsPos, satPos);
+          if (el < minEl) continue;
+
+          const distM = Cesium.Cartesian3.distance(gsPos, satPos);
+          const distKm = distM / 1000;
+          if (maxRangeKm > 0 && distKm > maxRangeKm) continue;
+
+          const b = radio.computeBudgetForDistanceMeters?.(distM);
+          if (!b) continue;
+          if (Number.isFinite(b.rxPowerDbm) && b.rxPowerDbm < rxSens) continue;
+          if (Number.isFinite(b.snrDb) && b.snrDb < minSnr) continue;
+
+          const capMbps = radio.computeCapacityMbps?.(b.snrDb);
+          const edge = {
+            kind: "gs",
+            aId: gsEnt.id,
+            bId: sat.id,
+            distanceKm: distKm,
+            snrDb: b.snrDb,
+            rxPowerDbm: b.rxPowerDbm,
+            noiseFloorDbm: b.noiseFloorDbm,
+            capacityMbps: Number.isFinite(capMbps) ? capMbps : 0
+          };
+
+          addEdge(gsEnt.id, sat.id, edge);
+          addEdge(sat.id, gsEnt.id, edge);
+        }
+      }
+    }
+
+    return { adj, cfg };
   }
 
-  function dijkstra(graph, start, goal) {
+  function routeWeight(edge, metric, dataMbits, cfg) {
+    const hopPenalty = 0.05;
+
+    const d = Number.isFinite(edge.distanceKm) ? edge.distanceKm : 1e9;
+    const snr = Number.isFinite(edge.snrDb) ? edge.snrDb : -999;
+    const cap = Number.isFinite(edge.capacityMbps) ? edge.capacityMbps : (cfg?.dataRateMbps ?? 1);
+    const minSnr = cfg?.minSnrDb ?? 5;
+
+    if (metric === "short") return d + hopPenalty;
+
+    if (metric === "reliable") {
+      const deficit = Math.max(0, (minSnr - snr));
+      const penalty = 1 + (deficit / Math.max(1, minSnr)) * 10;
+      return d * penalty + hopPenalty;
+    }
+
+    const t = dataMbits / Math.max(0.001, cap);
+    return t + hopPenalty;
+  }
+
+  function dijkstra(adj, start, goal, metric, dataMbits, cfg) {
     const dist = new Map();
     const prev = new Map();
-    const prevEdge = new Map();
     const visited = new Set();
 
     dist.set(start, 0);
 
-    function minNode() {
-      let bestN = null;
-      let bestD = Infinity;
-      for (const [n, d] of dist.entries()) {
-        if (visited.has(n)) continue;
-        if (d < bestD) { bestD = d; bestN = n; }
-      }
-      return bestN;
-    }
-
     while (true) {
-      const u = minNode();
-      if (!u) break;
+      let u = null;
+      let best = Infinity;
+      for (const [node, d] of dist.entries()) {
+        if (visited.has(node)) continue;
+        if (d < best) { best = d; u = node; }
+      }
+      if (u === null) break;
       if (u === goal) break;
       visited.add(u);
 
-      const edges = graph.get(u) || [];
-      for (const ed of edges) {
-        const v = ed.to;
-        if (visited.has(v)) continue;
-        const w = ed.info?.weight ?? 1;
-        const alt = (dist.get(u) ?? Infinity) + w;
-        if (alt < (dist.get(v) ?? Infinity)) {
-          dist.set(v, alt);
-          prev.set(v, u);
-          prevEdge.set(v, ed.info);
+      const edges = adj.get(u) || [];
+      for (const { to, edge } of edges) {
+        if (visited.has(to)) continue;
+        const w = routeWeight(edge, metric, dataMbits, cfg);
+        const alt = best + w;
+        if (alt < (dist.get(to) ?? Infinity)) {
+          dist.set(to, alt);
+          prev.set(to, { u, edge });
         }
       }
     }
@@ -729,20 +831,17 @@
     const path = [];
     const edgesInfo = [];
     let cur = goal;
-
-    while (cur != null) {
+    while (cur !== start) {
       path.push(cur);
-      const pe = prevEdge.get(cur);
-      if (pe) edgesInfo.push(pe);
-      cur = prev.get(cur) ?? null;
-      if (cur === start) {
-        path.push(start);
-        break;
-      }
+      const p = prev.get(cur);
+      if (!p) break;
+      edgesInfo.push(p.edge);
+      cur = p.u;
     }
-
+    path.push(start);
     path.reverse();
     edgesInfo.reverse();
+
     return { path, edgesInfo };
   }
 
@@ -757,7 +856,7 @@
     for (const inf of infos) {
       const cap = Number.isFinite(inf.capacityMbps) ? inf.capacityMbps : 0;
       const snr = Number.isFinite(inf.snrDb) ? inf.snrDb : -999;
-      const d = Number.isFinite(inf.distKm) ? inf.distKm : 0;
+      const d = Number.isFinite(inf.distanceKm) ? inf.distanceKm : 0;
 
       if (cap < minCap) minCap = cap;
       if (snr < minSnr) minSnr = snr;
@@ -770,95 +869,103 @@
     return { minCapMbps: minCap, minSnrDb: minSnr, maxHopDistKm: maxDist, hops: infos.length };
   }
 
-  function entityPositionAt(ent, time) {
-    return ent?.position?.getValue?.(time) || null;
-  }
-
-  function clearRouteEntities() {
+  // -------------------------
+  // Render route (динамические сегменты)
+  // -------------------------
+  function clearRouteEntitiesByPrefix(prefix) {
     const v = getViewer();
     if (!v) return;
-    for (const id of [gb.uplinkRouteId, gb.downlinkRouteId]) {
-      const e = v.entities.getById(id);
-      if (e) v.entities.remove(e);
+    const toRemove = [];
+    for (const e of v.entities.values) {
+      if (e?.id && String(e.id).startsWith(prefix)) toRemove.push(e);
     }
+    for (const e of toRemove) v.entities.remove(e);
   }
 
-  function renderRoute(route, entityId, color) {
+  function renderRoute(route, prefix, color) {
     const v = getViewer();
     if (!v || !route) return;
 
-    const time = nowJulian(getClock());
-    const positions = [];
+    clearRouteEntitiesByPrefix(prefix);
 
-    for (const nodeId of route.path) {
-      const ent = getEntityById(nodeId);
-      if (!ent) continue;
-      const pos = entityPositionAt(ent, time);
-      if (pos) positions.push(pos);
-    }
+    for (let i = 0; i < route.path.length - 1; i++) {
+      const aId = route.path[i];
+      const bId = route.path[i + 1];
 
-    if (positions.length < 2) return;
+      const aEnt = getEntityById(aId);
+      const bEnt = getEntityById(bId);
+      if (!aEnt || !bEnt) continue;
 
-    let ent = v.entities.getById(entityId);
-    if (!ent) {
-      ent = v.entities.add({
-        id: entityId,
-        name: entityId,
+      const id = `${prefix}${i}`;
+      const positions = new Cesium.CallbackProperty(() => {
+        const t = nowJulian(getClock());
+        const aPos = aEnt.position?.getValue?.(t);
+        const bPos = bEnt.position?.getValue?.(t);
+        if (!aPos || !bPos) return [];
+        return [aPos, bPos];
+      }, false);
+
+      v.entities.add({
+        id,
+        name: id,
         polyline: {
           positions,
           width: 3,
           material: color.withAlpha(0.9),
           clampToGround: false,
-        },
+        }
       });
-    } else {
-      ent.polyline.positions = positions;
     }
   }
 
   // -------------------------
   // Auto GS selection
   // -------------------------
-  function computeBestGsForRoute(fromIdList, toId, allowedMisId) {
-    const snap = buildGraphSnapshot(true, allowedMisId);
-    if (!snap) return null;
-
+  function computeBestUplinkAuto(time, misId) {
+    const stations = getGroundStations();
+    const dataMbits = 1.0;
     let best = null;
-    for (const gsId of fromIdList) {
-      const route = dijkstra(snap.g, gsId, toId);
-      if (!route) continue;
-      const sum = summarizeRoute(route);
+
+    for (const gs of stations) {
+      const g = buildGraphSnapshot(time, gs, true, misId);
+      if (!g) continue;
+      const r = dijkstra(g.adj, gs.id, misId, "fast", dataMbits, g.cfg);
+      if (!r) continue;
+      const sum = summarizeRoute(r);
       if (!sum) continue;
 
-      // Максимизируем bottleneck minCap
       if (!best || sum.minCapMbps > best.summary.minCapMbps) {
-        best = { gsId, route, summary: sum };
+        best = { gsId: gs.id, route: r, summary: sum };
       }
     }
     return best;
   }
 
-  function computeBestDownlinkGs(misId, sameAsUplink, uplinkGsId) {
+  function computeBestDownlinkAuto(time, misId, sameAsUplink, uplinkGsId) {
     const stations = getGroundStations();
-    const gsIds = stations.map(s => s.id);
-
-    const snap = buildGraphSnapshot(true, misId);
-    if (!snap) return null;
+    const dataMbits = getResultDataMbits();
 
     if (sameAsUplink && uplinkGsId) {
-      const route = dijkstra(snap.g, misId, uplinkGsId);
-      return { gsId: uplinkGsId, route, summary: summarizeRoute(route) };
+      const gs = stations.find(s => s.id === uplinkGsId);
+      if (gs) {
+        const g = buildGraphSnapshot(time, gs, true, misId);
+        const r = g ? dijkstra(g.adj, misId, uplinkGsId, "fast", dataMbits, g.cfg) : null;
+        if (r) return { gsId: uplinkGsId, route: r, summary: summarizeRoute(r) };
+      }
     }
 
     let best = null;
-    for (const gsId of gsIds) {
-      const route = dijkstra(snap.g, misId, gsId);
-      if (!route) continue;
-      const sum = summarizeRoute(route);
+    for (const gs of stations) {
+      const g = buildGraphSnapshot(time, gs, true, misId);
+      if (!g) continue;
+      const r = dijkstra(g.adj, misId, gs.id, "fast", dataMbits, g.cfg);
+      if (!r) continue;
+      const sum = summarizeRoute(r);
       if (!sum) continue;
 
-      if (!best || sum.minCapMbps > best.summary.minCapMbps) {
-        best = { gsId, route, summary: sum };
+      const estSec = dataMbits / Math.max(0.001, sum.minCapMbps);
+      if (!best || estSec < best.estSec) {
+        best = { gsId: gs.id, route: r, summary: sum, estSec };
       }
     }
     return best;
@@ -887,37 +994,44 @@
   // -------------------------
   // Build & render (uplink/downlink)
   // -------------------------
+
   function buildAndRenderRoutesSnapshot() {
     const misId = gb.chosenMisId;
     if (!misId) return;
 
+    const time = nowJulian(getClock());
     const mode = $("tasking-gb-gs-mode")?.value || "auto";
     const same = !!$("tasking-gb-same-gs")?.checked;
-
-    const stations = getGroundStations();
-    const gsIds = stations.map(s => s.id);
 
     let uplinkGsId = null;
     let downlinkGsId = null;
     let uplinkRoute = null;
     let downlinkRoute = null;
 
+    const uplinkCmdMbits = 1.0;
+    const downDataMbits = getResultDataMbits();
+
     if (mode === "manual") {
       uplinkGsId = $("tasking-gb-gs-uplink-manual")?.value || null;
       downlinkGsId = $("tasking-gb-gs-downlink-manual")?.value || null;
 
-      const snap = buildGraphSnapshot(true, misId);
-      if (snap && uplinkGsId) uplinkRoute = dijkstra(snap.g, uplinkGsId, misId);
-      if (snap && downlinkGsId) downlinkRoute = dijkstra(snap.g, misId, downlinkGsId);
+      const upGs = uplinkGsId ? getEntityById(uplinkGsId) : null;
+      const downGs = downlinkGsId ? getEntityById(downlinkGsId) : null;
+
+      const gUp = upGs ? buildGraphSnapshot(time, upGs, true, misId) : null;
+      const gDown = downGs ? buildGraphSnapshot(time, downGs, true, misId) : null;
+
+      if (gUp && uplinkGsId) uplinkRoute = dijkstra(gUp.adj, uplinkGsId, misId, "fast", uplinkCmdMbits, gUp.cfg);
+      if (gDown && downlinkGsId) downlinkRoute = dijkstra(gDown.adj, misId, downlinkGsId, "fast", downDataMbits, gDown.cfg);
     } else {
-      const bestUp = computeBestGsForRoute(gsIds, misId, misId);
+      const bestUp = computeBestUplinkAuto(time, misId);
       uplinkGsId = bestUp?.gsId || null;
       uplinkRoute = bestUp?.route || null;
 
       const upSel = $("tasking-gb-gs-uplink");
       if (upSel && uplinkGsId) upSel.value = uplinkGsId;
 
-      const bestDown = computeBestDownlinkGs(misId, same, uplinkGsId);
+      const bestDown = computeBestDownlinkAuto(time, misId, same, uplinkGsId);
       downlinkGsId = bestDown?.gsId || null;
       downlinkRoute = bestDown?.route || null;
     }
@@ -933,9 +1047,10 @@
     gb.lastBottleneckUplinkMbps = upSum?.minCapMbps ?? null;
     gb.lastBottleneckDownlinkMbps = downSum?.minCapMbps ?? null;
 
-    clearRouteEntities();
-    if (uplinkRoute) renderRoute(uplinkRoute, gb.uplinkRouteId, Cesium.Color.LIME);
-    if (downlinkRoute) renderRoute(downlinkRoute, gb.downlinkRouteId, Cesium.Color.CYAN);
+    clearRouteEntitiesByPrefix(gb.uplinkRoutePrefix);
+    clearRouteEntitiesByPrefix(gb.downlinkRoutePrefix);
+    if (uplinkRoute) renderRoute(uplinkRoute, gb.uplinkRoutePrefix, Cesium.Color.LIME);
+    if (downlinkRoute) renderRoute(downlinkRoute, gb.downlinkRoutePrefix, Cesium.Color.CYAN);
 
     const upSt = $("tasking-gb-uplink-status");
     const downSt = $("tasking-gb-downlink-status");
@@ -949,38 +1064,295 @@
     if (upBn) upBn.textContent = upSum ? `${upSum.minCapMbps.toFixed(2)} Mbps (min), SNR min ${upSum.minSnrDb.toFixed(1)} dB` : "—";
     if (downBn) downBn.textContent = downSum ? `${downSum.minCapMbps.toFixed(2)} Mbps (min), SNR min ${downSum.minSnrDb.toFixed(1)} dB` : "—";
 
-    const dataMbits = getResultDataMbits();
-    const downCap = downSum?.minCapMbps ?? 0;
-
     if (est) {
-      if (!downlinkRoute || downCap <= 0.0001) {
+      if (!downlinkRoute || (downSum?.minCapMbps ?? 0) <= 0.0001) {
         est.textContent = "— (нет downlink маршрута)";
       } else {
-        const sec = dataMbits / downCap;
-        est.textContent = `${formatTimeSeconds(sec)} (по bottleneck ${downCap.toFixed(2)} Mbps)`;
+        const sec = downDataMbits / Math.max(0.001, downSum.minCapMbps);
+        est.textContent = `${formatTimeSeconds(sec)} (по bottleneck ${downSum.minCapMbps.toFixed(2)} Mbps)`;
       }
     }
 
-    const st = $("tasking-gb-status");
-    if (st) {
-      const upName = uplinkGsId ? (getEntityById(uplinkGsId)?.name || uplinkGsId) : "—";
-      const downName = downlinkGsId ? (getEntityById(downlinkGsId)?.name || downlinkGsId) : "—";
-      st.textContent =
-        `Uplink: ${String(upName).replace(/^Наземная станция:\s*/i, "")} | Downlink: ${String(downName).replace(/^Наземная станция:\s*/i, "")}`;
-    }
+    const upName = uplinkGsId ? (getEntityById(uplinkGsId)?.name || uplinkGsId) : "—";
+    const downName = downlinkGsId ? (getEntityById(downlinkGsId)?.name || downlinkGsId) : "—";
+    setUplinkStation(upName || "—");
+    setDownlinkStation(downName || "—");
   }
 
   // -------------------------
   // Scenario start
   // -------------------------
-  function startGbScenario() {
-    const rect = gb.targetRect;
-    const st = $("tasking-gb-status");
 
-    if (!rect) { if (st) st.textContent = "Сначала задайте целевую область."; return; }
-    if (!gb.chosenMisId) { if (st) st.textContent = "Сначала выберите MIS-КА (исполнителя)."; return; }
+  // -------------------------
+  // Scenario start + runtime loop
+  // -------------------------
+
+  // -------------------------
+  // Status UI (раздельные строки)
+  // -------------------------
+  function setStationsLine(text) {
+    const el = $("tasking-gb-stations");
+    if (el) el.textContent = text || "—";
+    // обратная совместимость (если вдруг есть старое поле)
+    const legacy = $("tasking-gb-status");
+    if (legacy && !gb.task) legacy.textContent = text || "—";
+  }
+
+  function setMissionStatus(text) {
+    const el = $("tasking-gb-mission-status");
+    if (el) el.textContent = text || "—";
+    const legacy = $("tasking-gb-status");
+    if (legacy && text) legacy.textContent = text;
+  }
+
+  function setUplinkXfer(text) {
+    const el = $("tasking-gb-uplink-xfer");
+    if (el) el.textContent = text || "—";
+  }
+
+  function setDownlinkXfer(text) {
+    const el = $("tasking-gb-downlink-xfer");
+    if (el) el.textContent = text || "—";
+  }
+
+  function setUplinkStation(text) {
+    const el = $("tasking-gb-station-uplink");
+    if (el) el.textContent = text || "—";
+  }
+
+  function setDownlinkStation(text) {
+    const el = $("tasking-gb-station-downlink");
+    if (el) el.textContent = text || "—";
+  }
+
+  function setStatusLine(stageText) {
+    // legacy helper: обновляет новые поля, а при наличии старого span (tasking-gb-status) — тоже.
+    const station = gb.lastStationText || "—";
+    if (stageText) {
+      setMissionStatus(stageText);
+      setStationsLine(station);
+      const legacy = $("tasking-gb-status");
+      if (legacy) legacy.textContent = `${stageText} | ${station}`;
+    } else {
+      setStationsLine(station);
+      const legacy = $("tasking-gb-status");
+      if (legacy) legacy.textContent = station;
+    }
+  }
+
+  function stopGbTask(finalText) {
+    if (gb.taskTimer) {
+      clearInterval(gb.taskTimer);
+      gb.taskTimer = null;
+    }
+    gb.task = null;
+    if (finalText) {
+      setMissionStatus(finalText);
+      setUplinkXfer("—");
+      setDownlinkXfer("—");
+    }
+  }
+
+  function finalizeMissionSuccess() {
+    // Завершаем сценарий и очищаем визуализацию/выбор, чтобы была "завершаемость миссии"
+    if (gb.taskTimer) {
+      clearInterval(gb.taskTimer);
+      gb.taskTimer = null;
+    }
+    gb.task = null;
+
+    setMissionStatus("Задание выполнено. Файл передан на наземную станцию.");
+    setUplinkXfer("готово");
+    setDownlinkXfer("готово");
+
+    // очистить визуализацию маршрутов
+    clearRouteEntitiesByPrefix(gb.uplinkRoutePrefix);
+    clearRouteEntitiesByPrefix(gb.downlinkRoutePrefix);
+
+    // убрать подсветку выбранного MIS
+    setMisHighlight(null);
+
+    // сбросить выбранного исполнителя и UI
+    gb.chosenMisId = null;
+    gb.chosenEtaSec = null;
+    updateChosenUi(null, null);
+
+    // сбросить кэш маршрутов/станций и UI-строки
+    gb.lastUplinkGsId = null;
+    gb.lastDownlinkGsId = null;
+    gb.lastUplinkRoute = null;
+    gb.lastDownlinkRoute = null;
+    gb.lastBottleneckUplinkMbps = null;
+    gb.lastBottleneckDownlinkMbps = null;
+    gb.lastStationText = "—";
+    setStationsLine("—");
+    setUplinkStation("—");
+    setDownlinkStation("—");
+
+    // очистить маршрутные статусы/оценки
+    $("tasking-gb-uplink-status") && ($("tasking-gb-uplink-status").textContent = "—");
+    $("tasking-gb-downlink-status") && ($("tasking-gb-downlink-status").textContent = "—");
+    $("tasking-gb-uplink-bottleneck") && ($("tasking-gb-uplink-bottleneck").textContent = "—");
+    $("tasking-gb-downlink-bottleneck") && ($("tasking-gb-downlink-bottleneck").textContent = "—");
+    $("tasking-gb-est-time") && ($("tasking-gb-est-time").textContent = "—");
+  }
+
+  function tickGbTask() {
+    if (!gb.task) return;
 
     buildAndRenderRoutesSnapshot();
+
+    const timeNow = nowJulian(getClock());
+    const stage = gb.task.stage;
+
+    if (stage === "UPLINK_WAIT_ROUTE") {
+      if (gb.lastUplinkRoute && (gb.lastBottleneckUplinkMbps ?? 0) > 0) {
+        gb.task.stage = "UPLINKING";
+        setMissionStatus("Сценарий: uplink");
+        setUplinkXfer("передача задания…");
+        setDownlinkXfer("—");
+        setStatusLine("Uplink: передача задания…");
+      } else {
+        setMissionStatus("Сценарий: uplink");
+        setUplinkXfer("ожидание маршрута…");
+        setDownlinkXfer("—");
+        setStatusLine("Uplink: ожидание маршрута…");
+      }
+      return;
+    }
+
+    if (stage === "UPLINKING") {
+      const cap = Math.max(0, gb.lastBottleneckUplinkMbps ?? 0);
+      if (!gb.lastUplinkRoute || cap <= 0.0001) {
+        gb.task.stage = "UPLINK_WAIT_ROUTE";
+        setMissionStatus("Сценарий: uplink");
+        setUplinkXfer("маршрут потерян, ожидание…");
+        setDownlinkXfer("—");
+        setStatusLine("Uplink: маршрут потерян, ожидание…");
+        return;
+      }
+      gb.task.uplinkRemainingMbits = Math.max(0, gb.task.uplinkRemainingMbits - cap * 1.0);
+      setMissionStatus("Сценарий: uplink");
+      setUplinkXfer(`передача… осталось ${gb.task.uplinkRemainingMbits.toFixed(2)} Мбит`);
+      setDownlinkXfer("—");
+      setStatusLine(`Uplink: передача задания… осталось ${gb.task.uplinkRemainingMbits.toFixed(2)} Мбит`);
+
+      if (gb.task.uplinkRemainingMbits <= 0.0001) {
+        gb.task.stage = "WAIT_TARGET";
+        setMissionStatus("Ожидание входа в область…");
+        setUplinkXfer("задание доставлено");
+        setDownlinkXfer("—");
+        setStatusLine("Задание доставлено. Ожидание входа в область…");
+      }
+      return;
+    }
+
+    if (stage === "WAIT_TARGET") {
+      const left = Cesium.JulianDate.secondsDifference(gb.task.targetTime, timeNow);
+      if (left <= 0) {
+        gb.task.stage = "IMAGING";
+        gb.task.imagingRemainingSec = gb.task.imagingDurationSec;
+        setMissionStatus("Съёмка области…");
+        setUplinkXfer("задание доставлено");
+        setDownlinkXfer("—");
+        setStatusLine("Съёмка области…");
+      } else {
+        setMissionStatus(`Ожидание входа в область… ${formatTimeSeconds(left)}`);
+        setUplinkXfer("задание доставлено");
+        setDownlinkXfer("—");
+        setStatusLine(`Ожидание входа в область… ${formatTimeSeconds(left)}`);
+      }
+      return;
+    }
+
+    if (stage === "IMAGING") {
+      gb.task.imagingRemainingSec = Math.max(0, gb.task.imagingRemainingSec - 1);
+      if (gb.task.imagingRemainingSec <= 0) {
+        gb.task.stage = "DOWNLINK_WAIT_ROUTE";
+        setMissionStatus("Съёмка завершена. Сценарий: downlink");
+        setUplinkXfer("готово");
+        setDownlinkXfer("ожидание маршрута…");
+        setStatusLine("Съёмка завершена. Downlink: ожидание маршрута…");
+      } else {
+        setMissionStatus("Съёмка области…");
+      setUplinkXfer("задание доставлено");
+      setDownlinkXfer("—");
+      setStatusLine(`Съёмка области… осталось ${gb.task.imagingRemainingSec} c`);
+      }
+      return;
+    }
+
+    if (stage === "DOWNLINK_WAIT_ROUTE") {
+      if (gb.lastDownlinkRoute && (gb.lastBottleneckDownlinkMbps ?? 0) > 0) {
+        gb.task.stage = "DOWNLINKING";
+        setMissionStatus("Сценарий: downlink");
+        setUplinkXfer("готово");
+        setDownlinkXfer("передача результата…");
+        setStatusLine("Downlink: передача результата…");
+      } else {
+        setMissionStatus("Сценарий: downlink");
+        setUplinkXfer("готово");
+        setDownlinkXfer("ожидание маршрута…");
+        setStatusLine("Downlink: ожидание маршрута…");
+      }
+      return;
+    }
+
+    if (stage === "DOWNLINKING") {
+      const cap = Math.max(0, gb.lastBottleneckDownlinkMbps ?? 0);
+      if (!gb.lastDownlinkRoute || cap <= 0.0001) {
+        gb.task.stage = "DOWNLINK_WAIT_ROUTE";
+        setMissionStatus("Сценарий: downlink");
+        setUplinkXfer("готово");
+        setDownlinkXfer("маршрут потерян, ожидание…");
+        setStatusLine("Downlink: маршрут потерян, ожидание…");
+        return;
+      }
+
+      gb.task.downlinkRemainingMbits = Math.max(0, gb.task.downlinkRemainingMbits - cap * 1.0);
+      const est = gb.task.downlinkRemainingMbits / Math.max(0.001, cap);
+      setMissionStatus("Сценарий: downlink");
+      setUplinkXfer("готово");
+      setDownlinkXfer(`передача… осталось ${formatTimeSeconds(est)}`);
+      setStatusLine(`Downlink: передача результата… осталось ${formatTimeSeconds(est)}`);
+
+      if (gb.task.downlinkRemainingMbits <= 0.0001) {
+        finalizeMissionSuccess();
+      }
+      return;
+    }
+  }
+
+  function startGbScenario() {
+    const rect = gb.targetRect;
+
+    if (!rect) { setMissionStatus("Ошибка: сначала задайте целевую область."); setUplinkXfer("—"); setDownlinkXfer("—"); setStatusLine("Ошибка: сначала задайте целевую область."); return; }
+    if (!gb.chosenMisId) { setMissionStatus("Ошибка: сначала выберите MIS-КА (исполнителя)."); setUplinkXfer("—"); setDownlinkXfer("—"); setStatusLine("Ошибка: сначала выберите MIS-КА (исполнителя)."); return; }
+
+    if (gb.task) stopGbTask();
+
+    buildAndRenderRoutesSnapshot();
+
+    const t0 = nowJulian(getClock());
+    const etaSec = Number.isFinite(gb.chosenEtaSec) ? gb.chosenEtaSec : 0;
+    const targetTime = Cesium.JulianDate.addSeconds(t0, Math.max(0, etaSec), new Cesium.JulianDate());
+
+    gb.task = {
+      stage: "UPLINK_WAIT_ROUTE",
+      uplinkRemainingMbits: 1.0,
+      targetTime,
+      imagingDurationSec: 30,
+      imagingRemainingSec: 30,
+      downlinkRemainingMbits: getResultDataMbits(),
+    };
+
+    setMissionStatus("Сценарий запущен. Сценарий: uplink");
+    setUplinkXfer("ожидание маршрута…");
+    setDownlinkXfer("—");
+    setStatusLine("Сценарий запущен. Uplink: ожидание маршрута…");
+
+    if (gb.taskTimer) clearInterval(gb.taskTimer);
+    gb.taskTimer = setInterval(tickGbTask, 1000);
   }
 
   // -------------------------
@@ -1000,6 +1372,60 @@
       panel.classList.add("hidden");
       toggle.textContent = "▼ Задание ГБ";
     }
+  }
+
+  // -------------------------
+  // Reset executor (must be OUTSIDE init)
+  // -------------------------
+  function resetExecutor(reasonText) {
+    const msg = reasonText || "Исполнитель сброшен.";
+
+    // если шел сценарий — остановить
+    if (gb.task) stopGbTask(msg);
+
+    gb.chosenMisId = null;
+    gb.chosenEtaSec = null;
+
+    // UI
+    updateChosenUi(null, null);
+
+    // подсветка MIS
+    setMisHighlight(null);
+
+    // маршруты
+    clearRouteEntitiesByPrefix(gb.uplinkRoutePrefix);
+    clearRouteEntitiesByPrefix(gb.downlinkRoutePrefix);
+
+    // маршрутные поля/расчеты
+    $("tasking-gb-uplink-status") && ($("tasking-gb-uplink-status").textContent = "—");
+    $("tasking-gb-downlink-status") && ($("tasking-gb-downlink-status").textContent = "—");
+    $("tasking-gb-uplink-bottleneck") && ($("tasking-gb-uplink-bottleneck").textContent = "—");
+    $("tasking-gb-downlink-bottleneck") && ($("tasking-gb-downlink-bottleneck").textContent = "—");
+    $("tasking-gb-est-time") && ($("tasking-gb-est-time").textContent = "—");
+
+    // новые статусы
+    setMissionStatus(msg);
+    setUplinkXfer("—");
+    setDownlinkXfer("—");
+
+    gb.lastStationText = "—";
+    setStationsLine("—");
+
+    // если ты сделал отдельные строки станций
+    if (typeof setUplinkStation === "function") setUplinkStation("—");
+    if (typeof setDownlinkStation === "function") setDownlinkStation("—");
+
+    // кэш
+    gb.lastUplinkGsId = null;
+    gb.lastDownlinkGsId = null;
+    gb.lastUplinkRoute = null;
+    gb.lastDownlinkRoute = null;
+    gb.lastBottleneckUplinkMbps = null;
+    gb.lastBottleneckDownlinkMbps = null;
+
+    // legacy поле, если есть
+    const legacy = $("tasking-gb-status");
+    if (legacy) legacy.textContent = msg;
   }
 
   // -------------------------
@@ -1053,33 +1479,49 @@
       e.preventDefault();
       const st = $("tasking-gb-status");
       const rect = gb.targetRect;
+
       if (!rect) {
-        if (st) st.textContent = "Сначала задайте целевую область.";
+        const msg = "Сначала задайте целевую область.";
+        if (st) st.textContent = msg;
+        setMissionStatus(msg);
+        setUplinkXfer("—");
+        setDownlinkXfer("—");
         return;
       }
 
       const best = pickBestMissionSat(rect);
       if (!best) {
-        if (st) st.textContent = "Не найден подходящий MIS-КА.";
+        const msg = "Не найден подходящий MIS-КА.";
+        if (st) st.textContent = msg;
+        setMissionStatus(msg);
+        setUplinkXfer("—");
+        setDownlinkXfer("—");
+
         gb.chosenMisId = null;
+        gb.chosenEtaSec = null;
         updateChosenUi(null, null);
 
-        // NEW: убрать подсветку
+        // убрать подсветку
         setMisHighlight(null);
-
         return;
       }
 
       gb.chosenMisId = best.sat.id;
+      gb.chosenEtaSec = best.etaSec;
       updateChosenUi(best.sat.id, best.etaSec);
 
-      // NEW: подсветить выбранный MIS
+      // включить подсветку
       setMisHighlight(best.sat.id);
 
       const rKm = getImagingRadiusKm();
-      if (st) st.textContent = rKm > 0
+      const readyText = rKm > 0
         ? `ГОТОВО К ОТПРАВКЕ (радиус съёмки: ${rKm} км)`
         : "ГОТОВО К ОТПРАВКЕ (строго над областью)";
+      if (st) st.textContent = readyText;
+
+      setMissionStatus(readyText);
+      setUplinkXfer("—");
+      setDownlinkXfer("—");
 
       buildAndRenderRoutesSnapshot();
     });
@@ -1089,6 +1531,16 @@
       startGbScenario();
     });
 
+    // обработчик "Сброс исполнителя" — строго внутри init()
+    const rb = $("tasking-gb-reset-mis");
+    if (rb && !gb._resetBound) {
+      rb.addEventListener("click", (e) => {
+        e.preventDefault();
+        resetExecutor("Исполнитель сброшен.");
+      });
+      gb._resetBound = true;
+    }
+
     $("tasking-gb-size-mb")?.addEventListener("input", () => {
       if (gb.chosenMisId) buildAndRenderRoutesSnapshot();
     });
@@ -1097,7 +1549,6 @@
       if (gb.chosenMisId) buildAndRenderRoutesSnapshot();
     });
 
-    // При смене радиуса — обновляем буфер и (если есть MIS) маршруты
     $("tasking-gb-radius-km")?.addEventListener("input", () => {
       if (gb.targetRect) drawOrUpdateBufferRect();
       if (gb.chosenMisId) buildAndRenderRoutesSnapshot();
@@ -1113,40 +1564,15 @@
     updateGsModeUi();
     setPanelVisible(false);
 
-    // Если область уже есть (например, после hot-reload) — перерисуем
-    if (gb.targetRect) drawOrUpdateRect(gb.targetRect);
-$("tasking-gb-reset-mis")?.addEventListener("click", (e) => {
-  e.preventDefault();
+    // начальные значения новых строк статуса
+    setMissionStatus("—");
+    setUplinkXfer("—");
+    setDownlinkXfer("—");
+    setStationsLine(gb.lastStationText || "—");
 
-  gb.chosenMisId = null;
-
-  // очистить UI выбранного MIS
-  updateChosenUi(null, null);
-
-  // убрать подсветку
-  setMisHighlight(null);
-
-  // убрать маршруты uplink/downlink с карты
-  clearRouteEntities();
-
-  // сбросить статусы/поля расчётов
-  $("tasking-gb-status") && ($("tasking-gb-status").textContent = "Исполнитель сброшен.");
-  $("tasking-gb-uplink-status") && ($("tasking-gb-uplink-status").textContent = "—");
-  $("tasking-gb-downlink-status") && ($("tasking-gb-downlink-status").textContent = "—");
-  $("tasking-gb-uplink-bottleneck") && ($("tasking-gb-uplink-bottleneck").textContent = "—");
-  $("tasking-gb-downlink-bottleneck") && ($("tasking-gb-downlink-bottleneck").textContent = "—");
-  $("tasking-gb-est-time") && ($("tasking-gb-est-time").textContent = "—");
-
-  // сбросить кэш последнего маршрута
-  gb.lastUplinkGsId = null;
-  gb.lastDownlinkGsId = null;
-  gb.lastUplinkRoute = null;
-  gb.lastDownlinkRoute = null;
-  gb.lastBottleneckUplinkMbps = null;
-  gb.lastBottleneckDownlinkMbps = null;
-});
-
-
+    // если у тебя есть раздельные строки станций — сбросим их тоже
+    if (typeof setUplinkStation === "function") setUplinkStation("—");
+    if (typeof setDownlinkStation === "function") setDownlinkStation("—");
   }
 
   if (document.readyState === "loading") {

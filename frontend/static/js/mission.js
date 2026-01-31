@@ -1,4 +1,5 @@
 // static/js/mission.js
+// Панель "КА заданий" (MIS) — сделана в стиле панели "Орбиты и КА" из app.js
 
 (function () {
   if (typeof Cesium === "undefined") {
@@ -6,6 +7,7 @@
     return;
   }
 
+  // --- доступ к общему namespace ---
   const sm = (window.spaceMesh = window.spaceMesh || {});
   const viewer = sm.viewer || window.viewer;
   const clock = sm.clock || (viewer ? viewer.clock : null);
@@ -13,23 +15,35 @@
   const EARTH_RADIUS = sm.EARTH_RADIUS || window.EARTH_RADIUS;
 
   if (!viewer || !clock || !startTime || !EARTH_RADIUS) {
-    console.warn("mission.js: нет доступа к viewer/clock/start/EARTH_RADIUS. Проверь порядок подключения (app.js должен быть раньше).");
+    console.warn(
+      "mission.js: нет доступа к viewer/clock/start/EARTH_RADIUS. Проверь порядок подключения (app.js должен быть раньше)."
+    );
     return;
   }
 
+  // --- константы ---
   const DEG2RAD = Math.PI / 180;
   const MU = 3.986004418e14; // м^3/с^2
-  const T_SIDEREAL = 86164;  // сек
+  const T_SIDEREAL = 86164; // сек
   const OMEGA_E = (2 * Math.PI) / T_SIDEREAL;
 
+  // --- полярная "дырка" (как в app.js) ---
+  const POLAR_CAP_DEG = 8;
+  const POLAR_LAT_LIMIT_DEG = 90 - POLAR_CAP_DEG; // 82°
+
+  function orbitReachesForbiddenPolarZone(inclinationDeg, latLimitDeg) {
+    const maxLat = Math.min(inclinationDeg, 180 - inclinationDeg);
+    return maxLat > latLimitDeg;
+  }
+
+  // --- хранилище MIS-орбит ---
   const missionStore = sm.missionStore || [];
-  missionStore.length = missionStore.length; // сохранить ссылку
-  sm.missionStore = missionStore;
+  sm.missionStore = missionStore; // важно: сохраняем ссылку
 
-  let missionIdCounter = sm._missionIdCounter || 0;
-  sm._missionIdCounter = missionIdCounter;
+  sm._missionIdCounter = typeof sm._missionIdCounter === "number" ? sm._missionIdCounter : 0;
+  let missionIdCounter = sm._missionIdCounter;
 
-  // UI: toggle
+  // --- UI: toggle ---
   const missionPanel = document.getElementById("mission-panel");
   const missionToggle = document.getElementById("mission-toggle");
 
@@ -40,7 +54,7 @@
     });
   }
 
-  // Draggable
+  // --- Draggable (как у других панелей) ---
   function makeDraggable(panelEl, handleEl, storageKey = "missionPanelPos") {
     if (!panelEl || !handleEl) return;
 
@@ -55,8 +69,10 @@
     } catch {}
 
     let dragging = false;
-    let startX = 0, startY = 0;
-    let startLeft = 0, startTop = 0;
+    let startX = 0,
+      startY = 0;
+    let startLeft = 0,
+      startTop = 0;
 
     handleEl.addEventListener("pointerdown", (e) => {
       if (e.target && e.target.closest && e.target.closest("button, input, select, textarea")) return;
@@ -112,7 +128,63 @@
     makeDraggable(missionPanel, handle, "missionPanelPos");
   }
 
-  // Орбитальная математика
+  // --- утилиты ---
+  function emitTopologyChanged() {
+    window.dispatchEvent(new CustomEvent("spaceMesh:topologyChanged"));
+    if (window.spaceMesh?.radio?.onTopologyChanged) {
+      window.spaceMesh.radio.onTopologyChanged();
+    }
+  }
+
+  function cesiumColorToCss(color) {
+    const r = Math.round(color.red * 255);
+    const g = Math.round(color.green * 255);
+    const b = Math.round(color.blue * 255);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  function makeSquareDataUri(fillCss) {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">` +
+      `<rect x="10" y="10" width="44" height="44" rx="4" ry="4" fill="${fillCss}" stroke="white" stroke-width="4"/>` +
+      `</svg>`;
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  // Цвета MIS-орбит (как для орбит: золотое сечение, ярко, читаемо)
+function getMissionColorByIndex(index) {
+  // Приглушённая MIS-палитра (контраст к mesh), без HSL
+  const palette = [
+    Cesium.Color.fromCssColorString("#C8A951"), // песочно-золотой
+    Cesium.Color.fromCssColorString("#9E7C45"), // бронза
+    Cesium.Color.fromCssColorString("#8E6F4E"), // тёплый серо-коричневый
+    Cesium.Color.fromCssColorString("#A06A4A"), // терракота
+    Cesium.Color.fromCssColorString("#7E8F4E"), // оливковый
+    Cesium.Color.fromCssColorString("#6E7F6A"), // серо-зелёный
+    Cesium.Color.fromCssColorString("#8B5E5E"), // приглушённый красный
+    Cesium.Color.fromCssColorString("#5F6B73")  // серо-сине-стальной
+  ];
+
+  const base = palette[index % palette.length];
+
+  // Небольшая вариация яркости: -1 / 0 / +1
+  const v = (index % 3) - 1;
+
+  // Смешивание с белым/чёрным (надёжно для Cesium.Color)
+  const mix = (a, b, t) =>
+    new Cesium.Color(
+      a.red * (1 - t) + b.red * t,
+      a.green * (1 - t) + b.green * t,
+      a.blue * (1 - t) + b.blue * t,
+      1.0
+    );
+
+  if (v === 1) return mix(base, Cesium.Color.WHITE, 0.12); // чуть светлее
+  if (v === -1) return mix(base, Cesium.Color.BLACK, 0.10); // чуть темнее
+  return base;
+}
+
+  // --- орбитальная динамика (как в app.js) ---
   function computeOrbitDynamics(altitudeMeters) {
     const a = EARTH_RADIUS + altitudeMeters;
     const period = 2 * Math.PI * Math.sqrt(Math.pow(a, 3) / MU);
@@ -126,7 +198,13 @@
 
     const phaseStepDeg = options.phaseStepDeg || 0;
     const phaseStepRad = phaseStepDeg > 0 ? phaseStepDeg * DEG2RAD : null;
+
     const phaseOffsetRad = Math.random() * 2 * Math.PI;
+
+    // Межвитковый сдвиг трассы (к западу) за один период (как в app.js)
+    const interOrbitShiftDeg = 360 * (period / T_SIDEREAL);
+    const interOrbitShiftKmEquator =
+      (Math.abs(interOrbitShiftDeg) * Math.PI / 180) * (EARTH_RADIUS / 1000);
 
     return {
       name: options.name,
@@ -138,7 +216,9 @@
       evenSpacing: !!options.evenSpacing,
       phaseStepDeg,
       phaseStepRad,
-      phaseOffsetRad
+      phaseOffsetRad,
+      interOrbitShiftDeg,
+      interOrbitShiftKmEquator
     };
   }
 
@@ -190,41 +270,20 @@
       return result;
     }, false);
 
-    return viewer.entities.add({
-      name: orbit.name + " path (mission)",
-      polyline: {
-        positions: positionsCallback,
-        width: 1.6,
-        material: color.withAlpha(0.75)
-      }
-    });
+      return viewer.entities.add({
+        name: orbit.name + " path (MIS)",
+        polyline: {
+          positions: positionsCallback,
+          width: 1.4,
+          material: new Cesium.PolylineDashMaterialProperty({
+            color: color.withAlpha(0.85),
+            dashLength: 6.0 // ← меньше = чаще пунктир (попробуй 4..8)
+          })
+        }
+      });
   }
 
-  // Квадратный маркер
-  function cesiumColorToCss(color) {
-    const r = Math.round(color.red * 255);
-    const g = Math.round(color.green * 255);
-    const b = Math.round(color.blue * 255);
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-
-  function makeSquareDataUri(fillCss) {
-    const svg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">` +
-      `<rect x="10" y="10" width="44" height="44" rx="4" ry="4" fill="${fillCss}" stroke="white" stroke-width="4"/>` +
-      `</svg>`;
-    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-  }
-
-  // Цвета MIS-орбит
-  function getMissionColorByIndex(index) {
-    const goldenRatio = 0.618033988749895;
-    const hue = (index * goldenRatio) % 1.0;
-    const saturation = 0.80;
-    const lightness  = 0.58;
-    return Cesium.Color.fromHsl(hue, saturation, lightness, 1.0);
-  }
-
+  // --- MIS-КА на орбите (квадрат, как было) ---
   function createMissionSatelliteOnOrbit(orbit, color, satIndex, totalSatellites, participatesInMeshFlag) {
     let deltaThetaRad;
     if (orbit.evenSpacing || !orbit.phaseStepRad || orbit.phaseStepRad <= 0) {
@@ -262,8 +321,32 @@
     const fillCss = cesiumColorToCss(color);
     const img = makeSquareDataUri(fillCss);
 
-    const ent = viewer.entities.add({
-      name: `MIS-КА #${satIndex + 1}`,
+    const satIndexHuman = satIndex + 1;
+    const altitudeKm = orbit.altitude / 1000;
+    const inclinationDeg = (orbit.inclination * 180) / Math.PI;
+    const periodMin = orbit.period / 60;
+    const speedKms = orbit.orbitalSpeed / 1000;
+
+    // Параметры шага (для инфо)
+    const r = EARTH_RADIUS + orbit.altitude;
+    const phaseDeg = (deltaThetaRad * 180) / Math.PI;
+    const arcDistanceKm = (deltaThetaRad * r) / 1000;
+
+    const descriptionHtml = `
+      <div style="font-size:13px;">
+        <h3 style="margin-top:0;">MIS-КА №${satIndexHuman}</h3>
+        <p><b>Орбита:</b> ${orbit.name}</p>
+        <p><b>Высота орбиты:</b> ${altitudeKm.toFixed(0)} км</p>
+        <p><b>Наклонение:</b> ${inclinationDeg.toFixed(1)}°</p>
+        <p><b>Орбитальный период:</b> ${periodMin.toFixed(1)} мин</p>
+        <p><b>Орбитальная скорость:</b> ${speedKms.toFixed(2)} км/с</p>
+        <p><b>Фазовый шаг между соседними КА:</b> ${phaseDeg.toFixed(1)}°</p>
+        <p><b>Эквивалентное расстояние по орбите:</b> ${arcDistanceKm.toFixed(0)} км</p>
+      </div>
+    `;
+
+    return viewer.entities.add({
+      name: `MIS-КА #${satIndexHuman}`,
       position: positionProperty,
       billboard: {
         image: img,
@@ -273,22 +356,24 @@
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         scaleByDistance: new Cesium.NearFarScalar(1e6, 1.2, 1.2e7, 0.6)
       },
+      description: new Cesium.ConstantProperty(descriptionHtml),
       properties: {
         isSatellite: true,
         isMissionSatellite: true,
 
-        // ВАЖНО: unified mesh читает эти свойства
+        // unified radio mesh читает эти свойства
         participatesInMesh: new Cesium.ConstantProperty(!!participatesInMeshFlag),
         state: new Cesium.ConstantProperty("IDLE"),
+        missionRole: new Cesium.ConstantProperty("EO"),
 
-        missionRole: new Cesium.ConstantProperty("EO")
+        // данные для отладки/вывода
+        orbitName: new Cesium.ConstantProperty(orbit.name),
+        satelliteIndex: new Cesium.ConstantProperty(satIndexHuman)
       }
     });
-
-    return ent;
   }
 
-  // Создание миссий из формы
+  // --- создание/удаление миссий ---
   function safeNum(v, def, min = -Infinity, max = Infinity) {
     const x = parseFloat(v);
     if (!isFinite(x)) return def;
@@ -300,7 +385,7 @@
     const withPrefix = base.startsWith("MIS-") ? base : `MIS-${base}`;
     let name = withPrefix;
     let k = 1;
-    while (missionStore.some(g => g?.name === name)) {
+    while (missionStore.some((g) => g?.name === name)) {
       k += 1;
       name = `${withPrefix}-${k}`;
     }
@@ -309,119 +394,114 @@
 
   function addMissionOrbitWithSatellites(opts) {
     const color = getMissionColorByIndex(missionStore.length);
+    const cssColor = cesiumColorToCss(color);
 
     const orbit = createOrbit({
       name: opts.name,
       altitudeKm: opts.altitudeKm,
       inclinationDeg: opts.inclinationDeg,
       numSatellites: opts.numSatellites,
-      evenSpacing: true,
-      phaseStepDeg: 0
+      evenSpacing: opts.evenSpacing !== undefined ? !!opts.evenSpacing : true,
+      phaseStepDeg: opts.phaseStepDeg !== undefined ? opts.phaseStepDeg : 0
     });
 
     const polylineEntity = createOrbitPolyline(orbit, color);
 
     const satellites = [];
     for (let i = 0; i < orbit.numSatellites; i++) {
-      const satEnt = createMissionSatelliteOnOrbit(
-        orbit,
-        color,
-        i,
-        orbit.numSatellites,
-        opts.participatesInMesh
+      satellites.push(
+        createMissionSatelliteOnOrbit(orbit, color, i, orbit.numSatellites, opts.participatesInMesh)
       );
-      satellites.push(satEnt);
     }
 
     const group = {
       id: missionIdCounter++,
       name: orbit.name,
       color,
+      cssColor,
       orbit,
       polylineEntity,
-      satellites
+      satellites,
+      participatesInMesh: !!opts.participatesInMesh
     };
-    sm._missionIdCounter = missionIdCounter;
 
+    sm._missionIdCounter = missionIdCounter;
     missionStore.push(group);
+
+    renderMissionList();
+    emitTopologyChanged();
+  }
+
+  function deleteMissionOrbit(orbitId) {
+    const idx = missionStore.findIndex((g) => g && g.id === orbitId);
+    if (idx === -1) return;
+
+    const group = missionStore[idx];
+
+    if (group.polylineEntity) viewer.entities.remove(group.polylineEntity);
+    if (Array.isArray(group.satellites)) group.satellites.forEach((sat) => viewer.entities.remove(sat));
+
+    missionStore.splice(idx, 1);
+
+    renderMissionList();
+    emitTopologyChanged();
   }
 
   function deleteAllMissions() {
     for (let i = missionStore.length - 1; i >= 0; i--) {
       const g = missionStore[i];
       if (g?.polylineEntity) viewer.entities.remove(g.polylineEntity);
-      if (Array.isArray(g?.satellites)) g.satellites.forEach(ent => viewer.entities.remove(ent));
+      if (Array.isArray(g?.satellites)) g.satellites.forEach((ent) => viewer.entities.remove(ent));
     }
     missionStore.length = 0;
+
+    renderMissionList();
+    emitTopologyChanged();
   }
 
-  // UI: список MIS-орбит и управление
+  function deleteOneSatelliteFromMission(orbitId) {
+    const group = missionStore.find((g) => g && g.id === orbitId);
+    if (!group) return;
+    if (!Array.isArray(group.satellites) || group.satellites.length === 0) return;
+
+    const satEntity = group.satellites.pop();
+    viewer.entities.remove(satEntity);
+
+    // синхронизируем число
+    group.orbit.numSatellites = Math.max(0, group.satellites.length);
+
+    renderMissionList();
+    emitTopologyChanged();
+  }
+
+  function addOneSatelliteToMission(orbitId) {
+    const group = missionStore.find((g) => g && g.id === orbitId);
+    if (!group) return;
+
+    const orbit = group.orbit;
+    const color = group.color;
+
+    const totalNow = group.satellites.length;
+    const newSatIndex = totalNow;
+
+    const satEntity = createMissionSatelliteOnOrbit(
+      orbit,
+      color,
+      newSatIndex,
+      totalNow + 1,
+      group.participatesInMesh
+    );
+
+    group.satellites.push(satEntity);
+    orbit.numSatellites = group.satellites.length;
+
+    renderMissionList();
+    emitTopologyChanged();
+  }
+
+  // --- UI: список MIS-орбит (в стиле app.js) ---
   const missionListEl = document.getElementById("mission-list");
   const deleteAllBtn = document.getElementById("mission-delete-all");
-
-  function emitTopologyChanged() {
-    window.dispatchEvent(new Event("spaceMesh:topologyChanged"));
-  }
-
-  function formatKm(meters) { return (meters / 1000).toFixed(0); }
-  function formatDeg(rad) { return (rad * 180 / Math.PI).toFixed(1); }
-
-  function rebuildMissionSatellites(group, newCount) {
-    if (!group || !group.orbit) return;
-
-    if (Array.isArray(group.satellites)) {
-      group.satellites.forEach(ent => viewer.entities.remove(ent));
-    }
-    group.satellites = [];
-
-    group.orbit.numSatellites = newCount;
-
-    for (let i = 0; i < newCount; i++) {
-      const satEnt = createMissionSatelliteOnOrbit(
-        group.orbit,
-        group.color,
-        i,
-        newCount,
-        true
-      );
-      group.satellites.push(satEnt);
-    }
-
-    emitTopologyChanged();
-    renderMissionList();
-  }
-
-  function deleteMissionOrbitById(id) {
-    const idx = missionStore.findIndex(g => g && g.id === id);
-    if (idx < 0) return;
-
-    const g = missionStore[idx];
-    if (g?.polylineEntity) viewer.entities.remove(g.polylineEntity);
-    if (Array.isArray(g?.satellites)) g.satellites.forEach(ent => viewer.entities.remove(ent));
-
-    missionStore.splice(idx, 1);
-
-    emitTopologyChanged();
-    renderMissionList();
-  }
-
-  function addOneSatToMission(id) {
-    const g = missionStore.find(x => x && x.id === id);
-    if (!g || !g.orbit) return;
-
-    const cur = Math.max(0, g.orbit.numSatellites || (g.satellites?.length || 0));
-    const next = Math.min(cur + 1, 2000);
-    rebuildMissionSatellites(g, next);
-  }
-
-  function removeOneSatFromMission(id) {
-    const g = missionStore.find(x => x && x.id === id);
-    if (!g || !g.orbit) return;
-
-    const cur = Math.max(0, g.orbit.numSatellites || (g.satellites?.length || 0));
-    const next = Math.max(1, cur - 1);
-    rebuildMissionSatellites(g, next);
-  }
 
   function renderMissionList() {
     if (!missionListEl) return;
@@ -436,62 +516,114 @@
       return;
     }
 
-    missionStore.forEach((g) => {
-      if (!g || !g.orbit) return;
+    missionStore.forEach((group) => {
+      if (!group || !group.orbit) return;
 
       const li = document.createElement("li");
-      li.style.marginBottom = "8px";
+      if (group.cssColor) {
+        li.style.borderLeftColor = group.cssColor;
+      }
 
-      const count = g.orbit.numSatellites || (g.satellites ? g.satellites.length : 0);
+      const header = document.createElement("div");
+      header.className = "orbit-header";
 
-      li.innerHTML = `
-        <div style="display:flex; gap:8px; align-items:flex-start; justify-content:space-between;">
-          <div>
-            <div><b>${g.name}</b></div>
-            <div style="font-size:11px; opacity:.85;">
-              h=${formatKm(g.orbit.altitude)} км,
-              i=${formatDeg(g.orbit.inclination)}°,
-              КА=${count}
-            </div>
-          </div>
+      const headerLeft = document.createElement("div");
+      headerLeft.className = "orbit-header-left";
 
-          <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
-            <button type="button" data-act="mis-add-sat" data-id="${g.id}">➕ КА</button>
-            <button type="button" data-act="mis-del-sat" data-id="${g.id}">➖ КА</button>
-            <button type="button" data-act="mis-del-orbit" data-id="${g.id}" style="background:#d9534f;">
-              🗑 Орбита
-            </button>
-          </div>
-        </div>
+      const colorDot = document.createElement("div");
+      colorDot.className = "orbit-color-dot";
+      if (group.cssColor) colorDot.style.backgroundColor = group.cssColor;
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "orbit-name";
+      nameSpan.textContent = group.name;
+
+      headerLeft.appendChild(colorDot);
+      headerLeft.appendChild(nameSpan);
+
+      const countSpan = document.createElement("span");
+      countSpan.className = "orbit-count";
+      countSpan.textContent = `КА: ${group.satellites.length}`;
+
+      header.appendChild(headerLeft);
+      header.appendChild(countSpan);
+
+      // --- параметры (как в app.js) ---
+      const paramsDiv = document.createElement("div");
+      paramsDiv.className = "orbit-params";
+
+      const altKm = (group.orbit.altitude / 1000).toFixed(0);
+      const inclDeg = (group.orbit.inclination * 180) / Math.PI;
+      const periodMin = (group.orbit.period / 60).toFixed(1);
+
+      const totalSats = group.satellites.length > 0 ? group.satellites.length : group.orbit.numSatellites;
+
+      // deltaTheta (даже если MIS всегда evenSpacing=true — считаем аналогично)
+      let deltaThetaRad;
+      if (group.orbit.evenSpacing || !group.orbit.phaseStepRad || group.orbit.phaseStepRad <= 0) {
+        deltaThetaRad = totalSats > 0 ? (2 * Math.PI) / totalSats : 0;
+      } else {
+        deltaThetaRad = group.orbit.phaseStepRad;
+      }
+
+      const phaseDeg = (deltaThetaRad * 180) / Math.PI;
+      const rOrbit = EARTH_RADIUS + group.orbit.altitude;
+      const arcDistanceKm = (deltaThetaRad * rOrbit) / 1000;
+
+      const shiftDeg = group.orbit.interOrbitShiftDeg || 0;
+      const shiftKm = group.orbit.interOrbitShiftKmEquator || 0;
+
+      paramsDiv.innerHTML = `
+        <div>Высота орбиты, км: <b>${altKm}</b></div>
+        <div>Наклонение, °: <b>${inclDeg.toFixed(1)}</b></div>
+        <div>Период, мин: <b>${periodMin}</b></div>
+        <div>Фазовый шаг между КА, °: <b>${phaseDeg.toFixed(1)}</b></div>
+        <div>Эквивалентное расстояние по орбите, км: <b>${arcDistanceKm.toFixed(0)}</b></div>
+        <div>Равномерное распределение: <b>${group.orbit.evenSpacing ? "да" : "нет"}</b></div>
+        <div>Межвитковый сдвиг трассы, °: <b>${shiftDeg.toFixed(1)} (к западу)</b></div>
+        <div>Смещение начала следующего витка по экватору, км: <b>${shiftKm.toFixed(0)}</b></div>
       `;
+
+      // --- кнопки (как в app.js) ---
+      const actions = document.createElement("div");
+      actions.className = "orbit-actions";
+
+      const btnDeleteOrbit = document.createElement("button");
+      btnDeleteOrbit.className = "btn-delete-orbit";
+      btnDeleteOrbit.type = "button";
+      btnDeleteOrbit.textContent = "Удалить орбиту";
+      btnDeleteOrbit.onclick = () => deleteMissionOrbit(group.id);
+
+      const btnDeleteSat = document.createElement("button");
+      btnDeleteSat.className = "btn-delete-sat";
+      btnDeleteSat.type = "button";
+      btnDeleteSat.textContent = "Удалить один КА";
+      btnDeleteSat.onclick = () => deleteOneSatelliteFromMission(group.id);
+
+      const btnAddSat = document.createElement("button");
+      btnAddSat.className = "btn-add-sat";
+      btnAddSat.type = "button";
+      btnAddSat.textContent = "Добавить один КА";
+      btnAddSat.onclick = () => addOneSatelliteToMission(group.id);
+
+      actions.appendChild(btnDeleteOrbit);
+      actions.appendChild(btnDeleteSat);
+      actions.appendChild(btnAddSat);
+
+      li.appendChild(header);
+      li.appendChild(paramsDiv);
+      li.appendChild(actions);
 
       missionListEl.appendChild(li);
     });
   }
 
-  if (missionListEl) {
-    missionListEl.addEventListener("click", (e) => {
-      const btn = e.target.closest("button");
-      if (!btn) return;
-
-      const act = btn.dataset.act;
-      const id = parseInt(btn.dataset.id, 10);
-      if (!act || !isFinite(id)) return;
-
-      if (act === "mis-add-sat") addOneSatToMission(id);
-      else if (act === "mis-del-sat") removeOneSatFromMission(id);
-      else if (act === "mis-del-orbit") deleteMissionOrbitById(id);
-    });
-  }
-
+  // --- UI: удалить все ---
   if (deleteAllBtn) {
-    deleteAllBtn.addEventListener("click", () => {
-      deleteAllMissions();
-      emitTopologyChanged();
-      renderMissionList();
-    });
+    deleteAllBtn.addEventListener("click", () => deleteAllMissions());
   }
 
+  // --- UI: создание из формы ---
   const form = document.getElementById("mission-form");
   if (!form) {
     console.warn("mission.js: не найден #mission-form (панель миссий не добавлена).");
@@ -503,15 +635,13 @@
   const incEl = document.getElementById("mission-inclination");
   const numEl = document.getElementById("mission-num-sats");
 
-  const clearBtn = document.getElementById("clear-missions") || document.getElementById("mission-clear-all");
-
   form.addEventListener("submit", function (e) {
     e.preventDefault();
 
     const name = ensureMissionName(nameEl ? nameEl.value : "MIS-LEO");
     const altitudeKm = safeNum(altEl ? altEl.value : 450, 450, 120, 2000);
-    const inclinationDeg = safeNum(incEl ? incEl.value : 98, 98, 0, 180);
-    const numSatellites = Math.max(1, Math.floor(safeNum(numEl ? numEl.value : 4, 4, 1, 500)));
+    const inclinationDeg = safeNum(incEl ? incEl.value : 61, 61, 0, 180);
+    const numSatellites = Math.max(1, Math.floor(safeNum(numEl ? numEl.value : 20, 20, 1, 500)));
 
     addMissionOrbitWithSatellites({
       name,
@@ -521,25 +651,136 @@
       participatesInMesh: true
     });
 
-    renderMissionList();
-    emitTopologyChanged();
-
-    console.log(`[mission] created orbit=${name}, h=${altitudeKm}km, i=${inclinationDeg}°, sats=${numSatellites}, mesh=true`);
+    console.log(
+      `[mission] created orbit=${name}, h=${altitudeKm}km, i=${inclinationDeg}°, sats=${numSatellites}, mesh=true`
+    );
   });
 
-  if (clearBtn) {
-    clearBtn.addEventListener("click", function () {
-      deleteAllMissions();
-      emitTopologyChanged();
-      console.log("[mission] all missions deleted");
-      renderMissionList();
+
+  // --- UI: массовое создание MIS-орбит (как "Создать массив орбит" в app.js) ---
+  const bulkForm = document.getElementById("mission-bulk-orbits-form");
+  if (bulkForm) {
+    const altInput = document.getElementById("mission-bulk-altitude");
+    const numSatsInput = document.getElementById("mission-bulk-num-sats");
+    const evenSpacingInput = document.getElementById("mission-bulk-even-spacing");
+    const phaseStepInput = document.getElementById("mission-bulk-phase-step");
+    const numOrbitsInput = document.getElementById("mission-bulk-num-orbits");
+    const inclInfoEl = document.getElementById("mission-bulk-incl-info");
+    const skipPolarInput = document.getElementById("mission-bulk-skip-polar");
+
+    function updateInclInfo() {
+      if (!inclInfoEl || !numOrbitsInput || !skipPolarInput) return;
+
+      const numOrbitsRaw = parseInt(numOrbitsInput.value, 10);
+      const numOrbits = Number.isInteger(numOrbitsRaw) && numOrbitsRaw > 0 ? numOrbitsRaw : 1;
+
+      const skipPolar = !!skipPolarInput.checked;
+
+      const gapWidthDeg = 2 * POLAR_CAP_DEG; // 16° при cap=8
+      const lowMaxDeg = POLAR_LAT_LIMIT_DEG; // 82°
+      const highMinDeg = 180 - POLAR_LAT_LIMIT_DEG; // 98°
+      const allowedSpanDeg = 180 - (skipPolar ? gapWidthDeg : 0);
+
+      if (!skipPolar) {
+        const inclStep = 180 / numOrbits;
+        inclInfoEl.textContent = `Шаг между орбитами: ${inclStep.toFixed(2)}° (равномерно от 0 до 180°, 180° исключена)`;
+      } else {
+        const effStep = allowedSpanDeg / numOrbits;
+        inclInfoEl.textContent =
+          `Исключение околополярных включено: запрещённая зона ~(${lowMaxDeg.toFixed(1)}°..${highMinDeg.toFixed(1)}°). ` +
+          `Наклонения распределяются равномерно по допустимым зонам. ` +
+          `Эффективный шаг по допустимому диапазону: ${effStep.toFixed(2)}° (создастся ровно ${numOrbits} орбит)`;
+      }
+    }
+
+    // обновляем инфо при изменении
+    [numOrbitsInput, skipPolarInput].forEach((el) => {
+      if (!el) return;
+      el.addEventListener("change", updateInclInfo);
+      el.addEventListener("input", updateInclInfo);
+    });
+    updateInclInfo();
+
+    bulkForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      if (
+        !altInput ||
+        !numSatsInput ||
+        !evenSpacingInput ||
+        !phaseStepInput ||
+        !numOrbitsInput ||
+        !skipPolarInput
+      ) {
+        console.error("mission.js: не найдены элементы формы массовых MIS-орбит.");
+        return;
+      }
+
+      const altitudeRaw = parseFloat(altInput.value);
+      const numSatsRaw = parseInt(numSatsInput.value, 10);
+      const numOrbitsRaw = parseInt(numOrbitsInput.value, 10);
+
+      const altitudeKm = Number.isFinite(altitudeRaw) ? altitudeRaw : 450;
+      const numSatellites = Number.isInteger(numSatsRaw) ? numSatsRaw : 20;
+
+      const numOrbits = Number.isInteger(numOrbitsRaw) && numOrbitsRaw > 0 ? numOrbitsRaw : 1;
+
+      const evenSpacing = !!evenSpacingInput.checked;
+
+      const phaseStepRaw = parseFloat(phaseStepInput.value);
+      const phaseStepDeg = Number.isFinite(phaseStepRaw) ? phaseStepRaw : 0;
+
+      const skipPolar = !!skipPolarInput.checked;
+
+      // диап. наклонений: [0..180), 180 исключаем; при skipPolar — перепрыгиваем зону вокруг 90°
+      const gapWidthDeg = 2 * POLAR_CAP_DEG;
+      const lowMaxDeg = POLAR_LAT_LIMIT_DEG;
+      const highMinDeg = 180 - POLAR_LAT_LIMIT_DEG;
+      const allowedSpanDeg = 180 - (skipPolar ? gapWidthDeg : 0);
+
+      for (let k = 0; k < numOrbits; k++) {
+        let incl;
+
+        if (!skipPolar) {
+          incl = (k * 180) / numOrbits;
+        } else {
+          const t = k / numOrbits;
+          const s = t * allowedSpanDeg;
+
+          incl = s <= lowMaxDeg ? s : s + gapWidthDeg;
+
+          if (orbitReachesForbiddenPolarZone(incl, POLAR_LAT_LIMIT_DEG)) {
+            incl = highMinDeg;
+          }
+
+          if (incl >= 180) incl = 180 - 1e-6;
+        }
+
+        const inclRounded = Math.round(incl * 1000) / 1000;
+
+        const baseName = `MIS-Shell i=${inclRounded.toFixed(1)}°`;
+        const name = ensureMissionName(baseName);
+
+        addMissionOrbitWithSatellites({
+          name,
+          altitudeKm,
+          inclinationDeg: inclRounded,
+          numSatellites,
+          evenSpacing,
+          phaseStepDeg,
+          participatesInMesh: true
+        });
+      }
+
+      console.log(`[mission] bulk created: orbits=${numOrbits}, h=${altitudeKm}km, sats=${numSatellites}`);
     });
   }
 
+  // стартовый рендер
   renderMissionList();
 
+  // экспорт мини-API
   sm.mission = sm.mission || {};
   sm.mission.deleteAll = deleteAllMissions;
   sm.mission.store = missionStore;
-
 })();
