@@ -1,4 +1,4 @@
-html,
+﻿html,
 body,
 #cesiumContainer {
   width: 100%;
@@ -123,7 +123,7 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   padding: 4px 6px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
-  border-left: 4px solid transparent; /* тут будем ставить цвет орбиты */
+  border-left: 4px solid transparent; /* С‚СѓС‚ Р±СѓРґРµРј СЃС‚Р°РІРёС‚СЊ С†РІРµС‚ РѕСЂР±РёС‚С‹ */
 }
 
 #orbit-list .orbit-header {
@@ -245,8 +245,8 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 
 .radio-panel {
   position: absolute;
-  bottom: 60px;   /* Привязываем снизу */
-  right: 10px;    /* Привязываем справа */
+  bottom: 60px;   /* привязываем снизу */
+  right: 10px;    /* привязываем справа */
 
   left: auto;
   top: auto;
@@ -436,7 +436,7 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 .ground-toggle-btn {
   position: absolute;
   bottom: 30px;
-  right: 100px;   /* ← теперь РЕАЛЬНО работает */
+  right: 100px;   /* в†ђ С‚РµРїРµСЂСЊ Р Р•РђР›Р¬РќРћ СЂР°Р±РѕС‚Р°РµС‚ */
   z-index: 1101;
 
   background: rgba(20,20,20,0.75);
@@ -459,8 +459,8 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 
 /* чтобы панель можно было свободно перемещать */
 #ground-panel {
-  right: auto;   /* важно: чтобы не держалась за right */
-  bottom: auto;  /* важно: чтобы не держалась за bottom */
+  right: auto;   /* важно: не держать за right */
+  bottom: auto;  /* важно: не держать за bottom */
   left: 20px;    /* стартовая позиция */
   top: 80px;     /* стартовая позиция */
 }
@@ -490,6 +490,55 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 
 .ground-pass b, .ground-radio b { color: #00f6ff; }
 
+/* --- Сценарная кнопка в тулбаре Cesium --- */
+#spaceMeshScenarioButton {
+  background: linear-gradient(135deg, #ff5ec4 0%, #7c4dff 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 1px 14px;
+  font-weight: 700;
+  font-size: 13px;
+  height: 36px;
+  min-width: 170px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  position: absolute;
+  top: 1px;
+  right: 100px; /* сдвиг влево от кнопки Home */
+  margin-right: 0;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+  z-index: 2000;
+}
+
+#spaceMeshScenarioButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  filter: brightness(1.05);
+}
+
+#spaceMeshScenarioButton:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  filter: brightness(0.95);
+}
+
+#spaceMeshScenarioButton:focus-visible {
+  outline: 2px solid #ffb3f0;
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  #spaceMeshScenarioButton {
+    right: 10px;
+    top: 50px; /* опустить ниже, чтобы не перекрывать кнопки */
+  }
+}
+
 /* Панель КА заданий */
 #mission-panel {
   top: 90px;          /* ниже orbit-panel */
@@ -512,38 +561,38 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 .top-left-buttons .orbit-toggle-btn {
   position: static;
 }
-/* чтобы панель миссий можно было свободно перемещать */
+/* Чтобы панель миссий можно было свободно перемещать */
 #mission-panel {
   right: auto;
   bottom: auto;
 }
 
-/* заголовок = “ручка” для перетаскивания */
+/* заголовок =  ручка для перетаскивания */
 #mission-panel h1 {
   cursor: move;
   user-select: none;
 }
 
-/* Панель "Задания" — как "Орбиты и КА" */
+/* РџР°РЅРµР»СЊ "Р—Р°РґР°РЅРёСЏ" вЂ” РєР°Рє "РћСЂР±РёС‚С‹ Рё РљРђ" */
 #tasking-panel {
-  top: 45px;          /* как у #orbit-panel */
+  top: 45px;          /* РєР°Рє Сѓ #orbit-panel */
   left: 10px;
-  width: 400px;       /* как у #orbit-panel */
-  max-height: 75vh;   /* как у #orbit-panel */
+  width: 400px;       /* РєР°Рє Сѓ #orbit-panel */
+  max-height: 75vh;   /* РєР°Рє Сѓ #orbit-panel */
   overflow-y: auto;
 
-  right: auto;        /* чтобы draggable не тянуло вправо */
+  right: auto;        /* С‡С‚РѕР±С‹ draggable РЅРµ С‚СЏРЅСѓР»Рѕ РІРїСЂР°РІРѕ */
   bottom: auto;
 }
 
 
-/* Панель "Задание ГБ" — по стилю как "Задания", но смещена вправо */
+/* РџР°РЅРµР»СЊ "Р—Р°РґР°РЅРёРµ Р“Р‘" вЂ” РїРѕ СЃС‚РёР»СЋ РєР°Рє "Р—Р°РґР°РЅРёСЏ", РЅРѕ СЃРјРµС‰РµРЅР° РІРїСЂР°РІРѕ */
 #tasking-gb-panel {
   top: 45px;
   left: 420px;
   width: 640px;
 
-  max-width: 400px;   /* ← ВАЖНО: иначе режет .overlay-panel max-width:260px */
+  max-width: 400px;   /* в†ђ Р’РђР–РќРћ: РёРЅР°С‡Рµ СЂРµР¶РµС‚ .overlay-panel max-width:260px */
 
   max-height: 75vh;
   overflow-y: auto;
@@ -552,17 +601,17 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   bottom: auto;
 }
 
-/* заголовок = “ручка” для перетаскивания */
+/* Р·Р°РіРѕР»РѕРІРѕРє = вЂњСЂСѓС‡РєР°вЂќ РґР»СЏ РїРµСЂРµС‚Р°СЃРєРёРІР°РЅРёСЏ */
 #tasking-gb-panel h1 {
   cursor: move;
   user-select: none;
 }
 
-/* ===== Задание ГБ: цветовые акценты ===== */
-#tasking-gb-panel .hint { color: #eaeaea; }     /* базовый текст */
-#tasking-gb-panel b { color: #00f6ff; }         /* как в других твоих блоках */
+/* ===== Р—Р°РґР°РЅРёРµ Р“Р‘: С†РІРµС‚РѕРІС‹Рµ Р°РєС†РµРЅС‚С‹ ===== */
+#tasking-gb-panel .hint { color: #eaeaea; }     /* Р±Р°Р·РѕРІС‹Р№ С‚РµРєСЃС‚ */
+#tasking-gb-panel b { color: #00f6ff; }         /* РєР°Рє РІ РґСЂСѓРіРёС… С‚РІРѕРёС… Р±Р»РѕРєР°С… */
 
-#tasking-gb-panel .gb-ok   { color: #58d68d; }  /* зелёный */
-#tasking-gb-panel .gb-warn { color: #f4d03f; }  /* жёлтый */
-#tasking-gb-panel .gb-bad  { color: #ff6b6b; }  /* красный мягкий */
-#tasking-gb-panel .gb-dim  { color: #aab7b8; }  /* серый */
+#tasking-gb-panel .gb-ok   { color: #58d68d; }  /* Р·РµР»С‘РЅС‹Р№ */
+#tasking-gb-panel .gb-warn { color: #f4d03f; }  /* Р¶С‘Р»С‚С‹Р№ */
+#tasking-gb-panel .gb-bad  { color: #ff6b6b; }  /* РєСЂР°СЃРЅС‹Р№ РјСЏРіРєРёР№ */
+#tasking-gb-panel .gb-dim  { color: #aab7b8; }  /* СЃРµСЂС‹Р№ */

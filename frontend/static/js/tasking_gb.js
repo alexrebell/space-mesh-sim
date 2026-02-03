@@ -1,7 +1,5 @@
 // tasking_gb.js — панель "Задание ГБ" (uplink+downlink маршруты, оценка времени передачи)
-// + Радиус съёмки 0–300 км (0 = строго над областью)
-// + Визуализация буферной зоны (если радиус > 0)
-// + Под "Выбран:" показываем "Орбита:" выбранного MIS
+
 
 (function () {
   "use strict";
@@ -888,6 +886,13 @@ function setMisHighlight(misId) {
 
     clearRouteEntitiesByPrefix(prefix);
 
+    // Яркие и толстые линии без сглаживания: сплошной цвет с контуром.
+    const routeMaterial = new Cesium.PolylineOutlineMaterialProperty({
+      color: color.withAlpha(1.0),
+      outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
+      outlineWidth: 2.5
+    });
+
     for (let i = 0; i < route.path.length - 1; i++) {
       const aId = route.path[i];
       const bId = route.path[i + 1];
@@ -910,9 +915,31 @@ function setMisHighlight(misId) {
         name: id,
         polyline: {
           positions,
-          width: 3,
-          material: color.withAlpha(0.9),
+          width: 7,
+          material: routeMaterial,
           clampToGround: false,
+        }
+      });
+    }
+
+    // Маркер на конце маршрута (стрелка/кружок), не больше толщины линии.
+    const lastId = route.path[route.path.length - 1];
+    const lastEnt = getEntityById(lastId);
+    if (lastEnt) {
+      const endPos = new Cesium.CallbackProperty(() => {
+        const t = nowJulian(getClock());
+        return lastEnt.position?.getValue?.(t) || null;
+      }, false);
+
+      v.entities.add({
+        id: `${prefix}end`,
+        position: endPos,
+        point: {
+          pixelSize: 8, // чуть больше 7, но компактно
+          color: color.withAlpha(1.0),
+          outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       });
     }
@@ -1049,8 +1076,10 @@ function setMisHighlight(misId) {
 
     clearRouteEntitiesByPrefix(gb.uplinkRoutePrefix);
     clearRouteEntitiesByPrefix(gb.downlinkRoutePrefix);
-    if (uplinkRoute) renderRoute(uplinkRoute, gb.uplinkRoutePrefix, Cesium.Color.LIME);
-    if (downlinkRoute) renderRoute(downlinkRoute, gb.downlinkRoutePrefix, Cesium.Color.CYAN);
+    const UPLINK_COLOR = Cesium.Color.fromCssColorString("#ff5ec4");  // ярко-розовый
+    const DOWNLINK_COLOR = Cesium.Color.fromCssColorString("#00f6ff"); // неоново-голубой
+    if (uplinkRoute) renderRoute(uplinkRoute, gb.uplinkRoutePrefix, UPLINK_COLOR);
+    if (downlinkRoute) renderRoute(downlinkRoute, gb.downlinkRoutePrefix, DOWNLINK_COLOR);
 
     const upSt = $("tasking-gb-uplink-status");
     const downSt = $("tasking-gb-downlink-status");
