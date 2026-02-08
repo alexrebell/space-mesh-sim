@@ -503,6 +503,20 @@
   const antennaOmniBlock    = document.getElementById("antenna-omni-block");
   const antennaCustomBlock  = document.getElementById("antenna-custom-block");
 
+  const PHASED_PROFILE_TIPS = {
+    A: "Баланс: до ~1500 км, скорость ~60 Мбит/с. Основной режим для межорбитных 900–1500 км.",
+    B: "Скорость: до ~1100 км, скорость ~120 Мбит/с. Использовать с ближними соседями.",
+    C: "Надёжность: до ~1800 км, скорость ~35 Мбит/с. Резерв/устойчивость при разрежении."
+  };
+
+  function applyProfileTooltips() {
+    if (!phasedProfileSelect) return;
+    for (const opt of phasedProfileSelect.options || []) {
+      const tip = PHASED_PROFILE_TIPS[opt.value];
+      if (tip) opt.title = tip;
+    }
+  }
+
   function updateRadioMeshInfo(textHtml) {
     if (!radioMeshInfoEl) return;
     radioMeshInfoEl.innerHTML = textHtml;
@@ -600,6 +614,7 @@
   } else {
     updateAntennaBlocksVisibility(radioState.config.antennaType);
   }
+  applyProfileTooltips();
 
   // -------------------------------
   // Phased Array (ФАР) profiles (25 GHz)
@@ -607,22 +622,23 @@
 
   const PHASED_PROFILES = {
     A: {
-      name: "A — Дальность 1600 км (баланс)",
+      // Баланс: дальность ~1400–1600 км, скорость умеренная
+      name: "A — Баланс (до ~1500 км)",
       freqMHz: 25000,
-      txPowerDbm: 33,
-      rxSensDbm: -102,
-      minSnrDb: 5,
-      maxRangeKm: 0,
+      txPowerDbm: 32,
+      rxSensDbm: -96,
+      minSnrDb: 6,
+      maxRangeKm: 1650,
       noiseFloorDbm: -110,
 
       antennaType: "phased",
-      gainTxDb: 32,
-      gainRxDb: 32,
+      gainTxDb: 33,
+      gainRxDb: 33,
       beamWidthDeg: 4,
       pointingLossDb: 1.0,
       polLossDb: 0.3,
       phasedMaxScanDeg: 30,
-      phasedScanLossDb: 1.7,
+      phasedScanLossDb: 1.8,
 
       txFeederLossDb: 1.0,
       rxFeederLossDb: 1.0,
@@ -630,37 +646,38 @@
 
       modulation: "QPSK",
       codingRate: 0.5,
-      dataRateMbps: 50,
-      bandwidthMHz: 10,
+      dataRateMbps: 60,
+      bandwidthMHz: 15,
 
-      sysTempK: 700,
-      noiseBandwidthMHz: 10,
+      sysTempK: 650,
+      noiseBandwidthMHz: 15,
 
       maxNeighborsPerSat: 4,
       routingMetric: "snr_distance",
 
-      txElecPowerW: 80,
+      txElecPowerW: 75,
       dutyCycle: 0.2,
-      refDistanceKm: 1600
+      refDistanceKm: 1400
     },
 
     B: {
-      name: "B — Скорость (throughput)",
+      // Скорость: ближние соседи ~800–1200 км, высокая пропускная
+      name: "B — Скорость (до ~1100 км)",
       freqMHz: 25000,
-      txPowerDbm: 33,
-      rxSensDbm: -102,
-      minSnrDb: 6,
-      maxRangeKm: 0,
+      txPowerDbm: 34,
+      rxSensDbm: -93,
+      minSnrDb: 7,
+      maxRangeKm: 1100,
       noiseFloorDbm: -110,
 
       antennaType: "phased",
-      gainTxDb: 38,
-      gainRxDb: 38,
+      gainTxDb: 34,
+      gainRxDb: 34,
       beamWidthDeg: 4,
       pointingLossDb: 1.0,
       polLossDb: 0.3,
       phasedMaxScanDeg: 30,
-      phasedScanLossDb: 1.7,
+      phasedScanLossDb: 2.0,
 
       txFeederLossDb: 1.0,
       rxFeederLossDb: 1.0,
@@ -668,37 +685,38 @@
 
       modulation: "QPSK",
       codingRate: 0.5,
-      dataRateMbps: 100,
-      bandwidthMHz: 20,
+      dataRateMbps: 120,
+      bandwidthMHz: 25,
 
-      sysTempK: 700,
-      noiseBandwidthMHz: 20,
+      sysTempK: 650,
+      noiseBandwidthMHz: 25,
 
       maxNeighborsPerSat: 4,
       routingMetric: "snr_distance",
 
-      txElecPowerW: 80,
+      txElecPowerW: 95,
       dutyCycle: 0.2,
-      refDistanceKm: 1600
+      refDistanceKm: 950
     },
 
     C: {
-      name: "C — Надёжность (доступность)",
+      // Надёжность: fallback, минимизировать обрывы, дальность ~1700–1900 км
+      name: "C — Надёжность (до ~1800 км)",
       freqMHz: 25000,
-      txPowerDbm: 33,
-      rxSensDbm: -102,
+      txPowerDbm: 32,
+      rxSensDbm: -99,
       minSnrDb: 4,
-      maxRangeKm: 0,
+      maxRangeKm: 1850,
       noiseFloorDbm: -110,
 
       antennaType: "phased",
-      gainTxDb: 32,
-      gainRxDb: 32,
+      gainTxDb: 33,
+      gainRxDb: 33,
       beamWidthDeg: 4,
       pointingLossDb: 1.0,
       polLossDb: 0.3,
       phasedMaxScanDeg: 25,
-      phasedScanLossDb: 1.5,
+      phasedScanLossDb: 1.6,
 
       txFeederLossDb: 1.0,
       rxFeederLossDb: 1.0,
@@ -706,18 +724,18 @@
 
       modulation: "QPSK",
       codingRate: 0.5,
-      dataRateMbps: 30,
-      bandwidthMHz: 10,
+      dataRateMbps: 35,
+      bandwidthMHz: 12,
 
-      sysTempK: 700,
-      noiseBandwidthMHz: 10,
+      sysTempK: 600,
+      noiseBandwidthMHz: 12,
 
       maxNeighborsPerSat: 6,
       routingMetric: "snr_distance",
 
-      txElecPowerW: 80,
+      txElecPowerW: 70,
       dutyCycle: 0.2,
-      refDistanceKm: 1600
+      refDistanceKm: 1500
     }
   };
 
@@ -1035,6 +1053,17 @@
     const cfg = radioState.config;
     if (!radioLinkSummaryEl && !radioEnergySummaryEl) return;
 
+    function antennaTypeHuman(t) {
+      switch ((t || "").toLowerCase()) {
+        case "phased": return "Фазированная решётка (ФАР)";
+        case "omni": return "Всена­правленная антенна (омни)";
+        case "sector": return "Секторная антенна";
+        case "directional": return "Направленная антенна";
+        case "custom": return "Пользовательская антенна";
+        default: return t || "Антенна";
+      }
+    }
+
     let dRefKm = cfg.refDistanceKm;
     if ((!dRefKm || dRefKm <= 0) && radioState.lastAvgLinkDistKm > 0) dRefKm = radioState.lastAvgLinkDistKm;
     if (!dRefKm || dRefKm <= 0) dRefKm = 1000;
@@ -1106,20 +1135,24 @@
 
     if (radioLinkSummaryEl) {
       radioLinkSummaryEl.innerHTML =
-        `<b>Расчётные показатели канала (эталонный линк):</b><br/>
-         Тип антенны: <b>${cfg.antennaType}</b><br/>
-         Дальность d<sub>ref</sub> ≈ <b>${dRefKm.toFixed(0)}</b> км<br/>
-         FSPL(d<sub>ref</sub>) ≈ <b>${fsplRefDb.toFixed(1)}</b> dB<br/>
-         Rx(d<sub>ref</sub>) ≈ <b>${rxRefDbm.toFixed(1)}</b> dBm<br/>
-         N<sub>floor</sub> ≈ <b>${noiseFromTemp.toFixed(1)}</b> dBm<br/>
-         SNR(d<sub>ref</sub>) ≈ <b>${isFinite(snrRefDb) ? snrRefDb.toFixed(1) : "-"}</b> dB<br/>
-         Eb/N0(d<sub>ref</sub>) ≈ <b>${isFinite(ebnoRefDb) ? ebnoRefDb.toFixed(1) : "-"}</b> dB,
-         треб. ≈ <b>${ebnoReqDb.toFixed(1)}</b> dB,
-         запас ≈ <b>${isFinite(ebnoMarginDb) ? ebnoMarginDb.toFixed(1) : "-"}</b> dB<br/>
-         Оценочная пропускная способность C(d<sub>ref</sub>) ≈ <b>${isFinite(capRefMbps) ? capRefMbps.toFixed(1) : "-"}</b> Мбит/с<br/>
-         R<sub>max</sub> по Rx ≈ <b>${isFinite(rMaxRxKm) ? rMaxRxKm.toFixed(0) : "-"}</b> км,
-         по SNR ≈ <b>${isFinite(rMaxSnrKm) ? rMaxSnrKm.toFixed(0) : "-"}</b> км,
-         итог ≈ <b>${isFinite(rMaxKm) ? rMaxKm.toFixed(0) : "-"}</b> км`;
+        `<div style="margin-bottom:4px;"><b>Канал (эталонный линк)</b></div>
+         <div style="line-height:1.35;">
+           <div><b class="radio-label">Тип антенны:</b> <b>${antennaTypeHuman(cfg.antennaType)}</b></div>
+           <div><b class="radio-label">Опорная дальность (d<sub>ref</sub>):</b> <b>${dRefKm.toFixed(0)} км</b></div>
+           <div><b class="radio-label">Свободные потери (FSPL):</b> <b>${fsplRefDb.toFixed(1)} dB</b></div>
+           <div><b class="radio-label">Мощность на приёмнике (Rx):</b> <b>${rxRefDbm.toFixed(1)} dBm</b></div>
+           <div><b class="radio-label">Шум приёмника (T<sub>sys</sub>, B):</b> <b>${noiseFromTemp.toFixed(1)} dBm</b></div>
+           <div><b class="radio-label">Отношение сигнал/шум (SNR):</b> <b>${isFinite(snrRefDb) ? snrRefDb.toFixed(1) : "-"} dB</b></div>
+           <div><b class="radio-label">Eb/N0:</b> <b>${isFinite(ebnoRefDb) ? ebnoRefDb.toFixed(1) : "-"} dB</b>,
+             <b class="radio-label">требуется:</b> <b>${ebnoReqDb.toFixed(1)} dB</b>,
+             <b class="radio-label">запас:</b> <b>${isFinite(ebnoMarginDb) ? ebnoMarginDb.toFixed(1) : "-"} dB</b>
+           </div>
+           <div><b class="radio-label">Целевая скорость (MCS):</b> <b>${cfg.dataRateMbps} Мбит/с</b> при <b>${cfg.bandwidthMHz} МГц</b></div>
+           <div><b class="radio-label">Макс. теор. ёмкость (Шеннон):</b> <b>${isFinite(capRefMbps) ? capRefMbps.toFixed(1) : "-"} Мбит/с</b></div>
+           <div><b class="radio-label">Дальность R<sub>max</sub> (по Rx / по SNR / итог):</b>
+             <b>${isFinite(rMaxRxKm) ? rMaxRxKm.toFixed(0) : "-"} / ${isFinite(rMaxSnrKm) ? rMaxSnrKm.toFixed(0) : "-"} / ${isFinite(rMaxKm) ? rMaxKm.toFixed(0) : "-"} км</b>
+           </div>
+         </div>`;
     }
 
     if (radioEnergySummaryEl) {
@@ -1134,13 +1167,15 @@
       const Eorbit_Wh = Eorbit_J / 3600.0;
 
       radioEnergySummaryEl.innerHTML =
-        `<b>Энергетика КА:</b><br/>
-         Электрическая мощность Tx: <b>${Ptx.toFixed(1)}</b> W<br/>
-         Duty cycle: <b>${(duty * 100).toFixed(1)}</b> %<br/>
-         Энергия на бит E<sub>b</sub> ≈ <b>${isFinite(Ebit_J) ? (Ebit_J * 1e9).toFixed(2) : "-"}</b> нДж/бит<br/>
-         Средняя мощность по времени P<sub>avg</sub> ≈ <b>${Pavg.toFixed(2)}</b> W<br/>
-         Период орбиты ≈ <b>${(Torbit / 60).toFixed(1)}</b> мин<br/>
-         Расход энергии за виток ≈ <b>${isFinite(Eorbit_Wh) ? Eorbit_Wh.toFixed(3) : "-"}</b> Wh`;
+        `<div style="margin-bottom:4px;"><b>Энергетика КА</b></div>
+         <div style="line-height:1.35;">
+           <div><b class="radio-label">Пиковая электрическая мощность передатчика:</b> <b>${Ptx.toFixed(1)} W</b></div>
+           <div><b class="radio-label">Доля времени в передаче (duty cycle):</b> <b>${(duty * 100).toFixed(1)} %</b></div>
+           <div><b class="radio-label">Энергия на бит (E<sub>b</sub>):</b> <b>${isFinite(Ebit_J) ? (Ebit_J * 1e9).toFixed(2) : "-"} нДж/бит</b></div>
+           <div><b class="radio-label">Средняя потребляемая мощность:</b> <b>${Pavg.toFixed(2)} W</b></div>
+           <div><b class="radio-label">Период орбиты:</b> <b>${(Torbit / 60).toFixed(1)} мин</b></div>
+           <div><b class="radio-label">Энергозатраты за один виток:</b> <b>${isFinite(Eorbit_Wh) ? Eorbit_Wh.toFixed(3) : "-"} Wh</b></div>
+         </div>`;
     }
   }
 
@@ -1401,9 +1436,9 @@
        <b>Среднее число линков на один КА:</b> ≈ ${avgDegree.toFixed(2)}<br/>
        <b>Средняя дальность линка между КА:</b> ≈ ${isFinite(avgDistKm) ? avgDistKm.toFixed(1) : "-"} км<br/>
        <b>Оценочная суммарная пропускная способность сети:</b> ≈ ${isFinite(capacitySumMbps) ? capacitySumMbps.toFixed(1) : "-"} Мбит/с<br/>
-       <b>SNR, dB:</b> min=${isFinite(snrMin) ? snrMin.toFixed(1) : "-"}, 
-       avg=${isFinite(snrAvg) ? snrAvg.toFixed(1) : "-"}, 
-       max=${isFinite(snrMax) ? snrMax.toFixed(1) : "-"}<br/>
+       <b>Качество линков (SNR, dB):</b> минимум=${isFinite(snrMin) ? snrMin.toFixed(1) : "-"}, 
+       среднее=${isFinite(snrAvg) ? snrAvg.toFixed(1) : "-"}, 
+       максимум=${isFinite(snrMax) ? snrMax.toFixed(1) : "-"}<br/>
        <small>Обновление топологии каждые ${radioState.updatePeriodSec.toFixed(1)} с. StickyBonus=${cfg.stickyBonus || 0}.</small>`
     );
 

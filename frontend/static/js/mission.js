@@ -459,16 +459,34 @@ function getMissionColorByIndex(index) {
     emitTopologyChanged();
   }
 
+  function rebuildMissionSatellites(group, newTotal) {
+    if (!group || !group.orbit || !group.color) return;
+
+    const total = Math.max(0, newTotal);
+    const orbit = group.orbit;
+    const color = group.color;
+    const participates = !!group.participatesInMesh;
+
+    if (Array.isArray(group.satellites)) {
+      group.satellites.forEach((sat) => viewer.entities.remove(sat));
+    }
+
+    const satellites = [];
+    for (let i = 0; i < total; i++) {
+      satellites.push(createMissionSatelliteOnOrbit(orbit, color, i, total, participates));
+    }
+
+    group.satellites = satellites;
+    group.orbit.numSatellites = total;
+  }
+
   function deleteOneSatelliteFromMission(orbitId) {
     const group = missionStore.find((g) => g && g.id === orbitId);
     if (!group) return;
-    if (!Array.isArray(group.satellites) || group.satellites.length === 0) return;
+    const newTotal = (group.satellites?.length || 0) - 1;
+    if (newTotal < 0) return;
 
-    const satEntity = group.satellites.pop();
-    viewer.entities.remove(satEntity);
-
-    // синхронизируем число
-    group.orbit.numSatellites = Math.max(0, group.satellites.length);
+    rebuildMissionSatellites(group, newTotal);
 
     renderMissionList();
     emitTopologyChanged();
@@ -478,22 +496,7 @@ function getMissionColorByIndex(index) {
     const group = missionStore.find((g) => g && g.id === orbitId);
     if (!group) return;
 
-    const orbit = group.orbit;
-    const color = group.color;
-
-    const totalNow = group.satellites.length;
-    const newSatIndex = totalNow;
-
-    const satEntity = createMissionSatelliteOnOrbit(
-      orbit,
-      color,
-      newSatIndex,
-      totalNow + 1,
-      group.participatesInMesh
-    );
-
-    group.satellites.push(satEntity);
-    orbit.numSatellites = group.satellites.length;
+    rebuildMissionSatellites(group, (group.satellites?.length || 0) + 1);
 
     renderMissionList();
     emitTopologyChanged();

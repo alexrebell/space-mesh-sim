@@ -206,7 +206,8 @@ function updateLinkBetweenSelected() {
       }, false),
 
       width: 6.0,
-      material: Cesium.Color.RED.withAlpha(1.0)
+      material: Cesium.Color.RED.withAlpha(1.0),
+      arcType: Cesium.ArcType.NONE // draw straight chord instead of geodesic arc
     }
   });
 }
@@ -532,13 +533,55 @@ if (window.spaceMesh?.radio?.onTopologyChanged) {
 
 }
 
+function rebuildSatellitesOnOrbit(group, newTotal) {
+  if (!group || !group.orbit || !group.color) return;
+
+  const orbit = group.orbit;
+  const color = group.color;
+  const prevSatellites = Array.isArray(group.satellites) ? group.satellites : [];
+  const total = Math.max(0, newTotal);
+
+  let selectionAffected = false;
+  prevSatellites.forEach((sat) => {
+    if (sat === selectedSatA || sat === selectedSatB) {
+      selectionAffected = true;
+    }
+    viewer.entities.remove(sat);
+  });
+
+  const satellites = [];
+  for (let i = 0; i < total; i++) {
+    satellites.push(createSatelliteOnOrbit(orbit, color, i, total));
+  }
+
+  group.satellites = satellites;
+  group.orbit.numSatellites = total;
+
+  if (selectionAffected) {
+    selectedSatA = null;
+    selectedSatB = null;
+    lastLinkInfoUpdateSeconds = 0;
+
+    if (currentLinkEntity) {
+      viewer.entities.remove(currentLinkEntity);
+      currentLinkEntity = null;
+    }
+
+    if (linkInfoBody) {
+      linkInfoBody.innerHTML = "Выберите два КА на глобусе, по очереди.";
+    }
+
+    viewer.selectedEntity = undefined;
+  }
+}
+
 function deleteOneSatelliteFromOrbit(orbitId) {
   const group = orbitStore.find((o) => o.id === orbitId);
   if (!group) return;
-  if (group.satellites.length === 0) return;
+  const newTotal = group.satellites.length - 1;
+  if (newTotal < 0) return;
 
-  const satEntity = group.satellites.pop();
-  viewer.entities.remove(satEntity);
+  rebuildSatellitesOnOrbit(group, newTotal);
   renderOrbitList();
   window.dispatchEvent(new CustomEvent("spaceMesh:topologyChanged"));
 
@@ -548,14 +591,7 @@ function addOneSatelliteToOrbit(orbitId) {
   const group = orbitStore.find((o) => o.id === orbitId);
   if (!group) return;
 
-  const orbit = group.orbit;
-  const color = group.color;
-  const totalNow = group.satellites.length;
-  const newSatIndex = totalNow;
-
-  const satEntity = createSatelliteOnOrbit(orbit, color, newSatIndex, totalNow + 1);
-  group.satellites.push(satEntity);
-
+  rebuildSatellitesOnOrbit(group, group.satellites.length + 1);
   renderOrbitList();
   window.dispatchEvent(new CustomEvent("spaceMesh:topologyChanged"));
 if (window.spaceMesh?.radio?.onTopologyChanged) {

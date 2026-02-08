@@ -490,6 +490,12 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 
 .ground-pass b, .ground-radio b { color: #00f6ff; }
 
+/* radio-panel labels (стиль как в панели миссий) */
+.radio-panel .radio-label {
+  color: #00f6ff;
+  font-weight: 600;
+}
+
 /* --- Сценарная кнопка в тулбаре Cesium --- */
 #spaceMeshScenarioButton {
   background: linear-gradient(135deg, #ff5ec4 0%, #7c4dff 100%);
