@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <title>Space Mesh Simulator — Орбиты и КА</title>
+  <title>Space Mesh Simulator</title>
 
   <!-- Локальный CSS Cesium -->
   <link
@@ -19,10 +19,10 @@
 
 <!-- Верхние кнопки слева: в одну линию -->
 <div id="top-left-buttons" class="top-left-buttons">
-  <div id="orbit-toggle" class="orbit-toggle-btn">▲ Орбиты и КА</div>
+  <div id="orbit-toggle" class="orbit-toggle-btn">▼ Орбиты и КА</div>
   <div id="mission-toggle" class="orbit-toggle-btn">▼ КА заданий</div>
 <!--?  <div id="tasking-toggle" class="orbit-toggle-btn">▼ Задания</div>-->
-  <div id="tasking-gb-toggle" class="orbit-toggle-btn">▼ Задание ГБ</div>
+  <div id="tasking-gb-toggle" class="orbit-toggle-btn">▼ Миссия</div>
 </div>
 
   <!-- Панель управления -->
@@ -48,7 +48,7 @@
 
     <label>
       Количество КА:
-      <input id="mission-num-sats" type="number" value="20" min="1"/>
+      <input id="mission-num-sats" type="number" value="30" min="1"/>
     </label>
 
     <button type="submit">➕ Создать КА заданий</button>
@@ -219,7 +219,7 @@
 
 <!-- Левая панель: Задание ГБ -->
 <div id="tasking-gb-panel" class="overlay-panel hidden">
-  <h1>Задание ГБ</h1>
+  <h1>Миссия</h1>
 
   <h2 style="margin:8px 0 6px;">Отправитель</h2>
   <label>
@@ -260,7 +260,7 @@
   <button id="tasking-gb-refresh-gs" type="button" style="margin-top:6px;">↻ Обновить список станций</button>
 
   <h2 style="margin:10px 0 6px;">Целевая область (координаты)</h2>
-  <div class="row">
+  <div class="row gb-row-vert" style="display:block; width:100%;">
     <label style="width:100%;">
       Lon min:
       <input id="tasking-gb-lon-min" type="number" step="0.001" value="37.20" />
@@ -270,7 +270,7 @@
       <input id="tasking-gb-lon-max" type="number" step="0.001" value="38.10" />
     </label>
   </div>
-  <div class="row">
+  <div class="row gb-row-vert" style="display:block; width:100%;">
     <label style="width:100%;">
       Lat min:
       <input id="tasking-gb-lat-min" type="number" step="0.001" value="48.55" />
@@ -291,11 +291,11 @@
   <h2 style="margin:10px 0 6px;">Размер данных</h2>
   <label>
     Размер снимка, МБ:
-    <input id="tasking-gb-size-mb" type="number" min="1" step="1" value="10240" />
+    <input id="tasking-gb-size-mb" type="number" min="1" step="1" value="1024" />
+    <div class="hint size-hint">
+      Время передачи будет оценено по пропускной способности маршрута (узкое место).
+    </div>
   </label>
-  <div class="hint">
-    10240 МБ ≈ 10 ГБ. Время передачи будет оценено по пропускной способности маршрута (узкое место).
-  </div>
 
   <h2 style="margin:10px 0 6px;">Исполнитель (MIS-КА)</h2>
   <button id="tasking-gb-pick-mis" type="button">Подобрать исполнителя</button>
@@ -332,7 +332,7 @@
   </div>
 </div>
 
-  <div id="orbit-panel" class="overlay-panel">
+<div id="orbit-panel" class="overlay-panel hidden">
       <h1>Орбиты и КА</h1>
 
     <form id="orbit-form">

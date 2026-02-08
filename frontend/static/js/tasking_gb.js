@@ -241,6 +241,8 @@ function setMisHighlight(misId) {
     lastDownlinkRoute: null,
     lastBottleneckUplinkMbps: null,
     lastBottleneckDownlinkMbps: null,
+    fixedUplinkGsId: null,
+    fixedDownlinkGsId: null,
     lastStationText: "—",
 
     // Сценарий (uplink → ожидание области → съёмка → downlink)
@@ -514,6 +516,86 @@ function setMisHighlight(misId) {
   }
 
   // -------------------------
+  // Imaging duration UI + getter
+  // -------------------------
+  function ensureImagingDurationUi() {
+    if ($("tasking-gb-duration-sec")) return;
+
+    const sizeInput = $("tasking-gb-size-mb");
+    if (!sizeInput) return;
+
+    const parent = sizeInput.closest(".row") || sizeInput.parentElement;
+    if (!parent) return;
+
+    const manualRow = document.createElement("div");
+    manualRow.className = "gb-duration-block";
+    manualRow.style.width = "100%";
+    manualRow.style.display = "flex";
+    manualRow.style.flexDirection = "column";
+    manualRow.style.gap = "6px";
+    manualRow.innerHTML = `
+      <label class="gb-duration-toggle">
+        <input id="tasking-gb-duration-manual" type="checkbox" />
+        <span>Задать время съёмки вручную</span>
+      </label>
+      <label class="gb-duration-input">
+        Время съёмки, c:
+        <input id="tasking-gb-duration-sec" type="number" min="1" max="3600" step="1" value="10" disabled />
+      </label>
+      <div class="hint" id="tasking-gb-duration-hint"></div>
+    `;
+
+    parent.appendChild(manualRow);
+
+    const manualCb = $("tasking-gb-duration-manual");
+    const durInput = $("tasking-gb-duration-sec");
+    if (manualCb && durInput) {
+      manualCb.addEventListener("change", () => {
+        durInput.disabled = !manualCb.checked;
+      });
+      durInput.addEventListener("input", () => {
+        const v = parseFloat(durInput.value);
+        if (!Number.isFinite(v) || v < 1) durInput.value = "10";
+      });
+    }
+  }
+
+  function getImagingDurationSeconds(rect) {
+    const manual = $("tasking-gb-duration-manual")?.checked;
+    const durInput = $("tasking-gb-duration-sec");
+    if (manual && durInput) {
+      const v = parseFloat(durInput.value);
+      const sec = Number.isFinite(v) ? clamp(v, 1, 3600) : 10;
+      durInput.value = String(sec);
+      return sec;
+    }
+
+    // Автоматическая оценка: вдольтрековая протяжённость / скорость пролёта
+    if (!rect) return 30;
+    const rKm = getImagingRadiusKm();
+    const eff = expandRectByKm(rect, rKm);
+    const midLat = (eff.latMin + eff.latMax) * 0.5;
+    const latRad = Cesium.Math.toRadians(midLat);
+    const kmPerDegLat = 111.32;
+    const kmPerDegLon = 111.32 * Math.max(0.2, Math.cos(latRad));
+    const heightKm = Math.max(0, (eff.latMax - eff.latMin) * kmPerDegLat);
+    const widthKm = Math.max(0, (eff.lonMax - eff.lonMin) * kmPerDegLon);
+
+    const groundSpeedKms = 7.5; // прибл. скорость проекции LEO
+    const alongTrackKm = Math.max(heightKm, 1);
+    let sec = alongTrackKm / groundSpeedKms;
+
+    // если полоса слишком узкая относительно ширины — добавим коэффициент
+    const swathKm = Math.max(2 * rKm, widthKm * 0.5);
+    if (swathKm < widthKm) {
+      sec *= widthKm / Math.max(swathKm, 1);
+    }
+
+    sec = clamp(sec, 5, 1800);
+    return sec;
+  }
+
+  // -------------------------
   // Extra UI: orbit line under "Выбран"
   // -------------------------
   // function ensureOrbitLineUi() {
@@ -614,6 +696,14 @@ function setMisHighlight(misId) {
     if (c) c.textContent = label;
     if (e) e.textContent = (etaSec != null ? `${Math.round(etaSec)} c` : "—");
     setOrbitUiText(orbitName);
+
+    // Обновим подсказку по оценке времени съёмки (авто/ручной)
+    const hint = $("tasking-gb-duration-hint");
+    if (hint) {
+      const rect = gb.targetRect;
+      const sec = getImagingDurationSeconds(rect);
+      hint.textContent = `Оценка времени съёмки: ~${sec.toFixed(0)} c`;
+    }
   }
 
   // -------------------------
@@ -918,6 +1008,9 @@ function setMisHighlight(misId) {
           width: 7,
           material: routeMaterial,
           clampToGround: false,
+          arcType: Cesium.ArcType.NONE, // прямой сегмент без дуги
+          depthFailMaterial: routeMaterial, // рисуем и когда уходит в землю
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
         }
       });
     }
@@ -948,11 +1041,65 @@ function setMisHighlight(misId) {
   // -------------------------
   // Auto GS selection
   // -------------------------
-  function computeBestUplinkAuto(time, misId) {
+  function groundDistanceKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = Cesium.Math.toRadians(lat2 - lat1);
+    const dLon = Cesium.Math.toRadians(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(Cesium.Math.toRadians(lat1)) *
+        Math.cos(Cesium.Math.toRadians(lat2)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  function stationPosCartesian(gs) {
+    return Cesium.Cartesian3.fromDegrees(
+      gs.properties?.lon ?? gs.lon,
+      gs.properties?.lat ?? gs.lat,
+      gs.properties?.alt_m ?? gs.alt_m ?? 0
+    );
+  }
+
+  function misCartoAtTime(misEnt, time) {
+    const pos = misEnt?.position?.getValue?.(time);
+    if (!pos) return null;
+    return Cesium.Cartographic.fromCartesian(pos);
+  }
+
+  function hasLoSStationAtTime(gs, misEnt, time) {
+    const gsPos = stationPosCartesian(gs);
+    const satPos = misEnt?.position?.getValue?.(time);
+    if (!gsPos || !satPos) return false;
+
+    const minEl = gs.properties?.minElevationDeg?.getValue?.(time) ?? gs.properties?.min_elevation_deg ?? 10;
+
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(gsPos);
+    const inv = Cesium.Matrix4.inverse(enu, new Cesium.Matrix4());
+    const rel = Cesium.Cartesian3.subtract(satPos, gsPos, new Cesium.Cartesian3());
+    const rel4 = new Cesium.Cartesian4(rel.x, rel.y, rel.z, 0.0);
+    const enu4 = Cesium.Matrix4.multiplyByVector(inv, rel4, new Cesium.Cartesian4());
+    const e = enu4.x, n = enu4.y, u = enu4.z;
+    const horiz = Math.sqrt(e * e + n * n);
+    const el = Math.atan2(u, horiz);
+    const elDeg = Cesium.Math.toDegrees(el);
+    return elDeg >= minEl;
+  }
+
+  function computeBestUplinkAuto(time, misId, targetRect) {
     const stations = getGroundStations();
     const dataMbits = 1.0;
-    let best = null;
+    const misEnt = getEntityById(misId);
+    const misCarto = misCartoAtTime(misEnt, time);
 
+    const targetCenter =
+      targetRect
+        ? { lon: (targetRect.lonMin + targetRect.lonMax) * 0.5, lat: (targetRect.latMin + targetRect.latMax) * 0.5 }
+        : null;
+
+    let best = null;
     for (const gs of stations) {
       const g = buildGraphSnapshot(time, gs, true, misId);
       if (!g) continue;
@@ -961,8 +1108,29 @@ function setMisHighlight(misId) {
       const sum = summarizeRoute(r);
       if (!sum) continue;
 
-      if (!best || sum.minCapMbps > best.summary.minCapMbps) {
-        best = { gsId: gs.id, route: r, summary: sum };
+      // Близость к КА и к центру области
+      let score = 0;
+      if (misCarto) {
+        const dSat = groundDistanceKm(
+          Cesium.Math.toDegrees(misCarto.latitude),
+          Cesium.Math.toDegrees(misCarto.longitude),
+          gs.properties?.lat ?? gs.lat,
+          gs.properties?.lon ?? gs.lon
+        );
+        score += dSat;
+      }
+      if (targetCenter) {
+        const dT = groundDistanceKm(targetCenter.lat, targetCenter.lon, gs.properties?.lat ?? gs.lat, gs.properties?.lon ?? gs.lon);
+        score += dT * 0.5;
+      }
+
+      // Требуем текущую видимость, если есть хоть одна; иначе возьмём наилучший из невидимых
+      const visibleNow = hasLoSStationAtTime(gs, misEnt, time);
+
+      if (!best ||
+          (visibleNow && !best.visibleNow) ||
+          (visibleNow === best.visibleNow && score < best.score)) {
+        best = { gsId: gs.id, route: r, summary: sum, score, visibleNow };
       }
     }
     return best;
@@ -971,6 +1139,7 @@ function setMisHighlight(misId) {
   function computeBestDownlinkAuto(time, misId, sameAsUplink, uplinkGsId) {
     const stations = getGroundStations();
     const dataMbits = getResultDataMbits();
+    const misEnt = getEntityById(misId);
 
     if (sameAsUplink && uplinkGsId) {
       const gs = stations.find(s => s.id === uplinkGsId);
@@ -982,6 +1151,8 @@ function setMisHighlight(misId) {
     }
 
     let best = null;
+    const fallback = [];
+
     for (const gs of stations) {
       const g = buildGraphSnapshot(time, gs, true, misId);
       if (!g) continue;
@@ -991,10 +1162,53 @@ function setMisHighlight(misId) {
       if (!sum) continue;
 
       const estSec = dataMbits / Math.max(0.001, sum.minCapMbps);
-      if (!best || estSec < best.estSec) {
-        best = { gsId: gs.id, route: r, summary: sum, estSec };
+      const futureTime = Cesium.JulianDate.addSeconds(time, estSec, new Cesium.JulianDate());
+
+      // Предсказанная позиция MIS в конце передачи
+      const misFutureCarto = misCartoAtTime(misEnt, futureTime);
+      const misFutureLoS = hasLoSStationAtTime(gs, misEnt, futureTime);
+
+      let distFutureKm = Number.POSITIVE_INFINITY;
+      if (misFutureCarto) {
+        distFutureKm = groundDistanceKm(
+          Cesium.Math.toDegrees(misFutureCarto.latitude),
+          Cesium.Math.toDegrees(misFutureCarto.longitude),
+          gs.properties?.lat ?? gs.lat,
+          gs.properties?.lon ?? gs.lon
+        );
+      }
+
+      const hops = (r?.path?.length ?? 1) - 1;
+      const candidate = {
+        gsId: gs.id,
+        route: r,
+        summary: sum,
+        estSec,
+        losFuture: misFutureLoS,
+        distFutureKm,
+        hops
+      };
+      fallback.push(candidate);
+
+      if (!misFutureLoS) continue;
+
+      // Критерий: минимальная дистанция в конце передачи, затем время, затем пропускная способность, затем меньше хопов
+      if (
+        !best ||
+        distFutureKm < best.distFutureKm - 1e-6 ||
+        (Math.abs(distFutureKm - best.distFutureKm) < 1e-6 && estSec < best.estSec - 1e-6) ||
+        (Math.abs(distFutureKm - best.distFutureKm) < 1e-6 && Math.abs(estSec - best.estSec) < 1e-6 && sum.minCapMbps > best.summary.minCapMbps + 1e-6) ||
+        (Math.abs(distFutureKm - best.distFutureKm) < 1e-6 && Math.abs(estSec - best.estSec) < 1e-6 && Math.abs(sum.minCapMbps - best.summary.minCapMbps) < 1e-6 && hops < (best.hops ?? 1e9))
+      ) {
+        best = candidate;
       }
     }
+
+    // Если ни одна станция не видна в конце передачи, выбираем лучший по времени из общего списка
+    if (!best && fallback.length) {
+      best = fallback.sort((a, b) => a.estSec - b.estSec || b.summary.minCapMbps - a.summary.minCapMbps)[0];
+    }
+
     return best;
   }
 
@@ -1039,6 +1253,9 @@ function setMisHighlight(misId) {
     const downDataMbits = getResultDataMbits();
 
     if (mode === "manual") {
+      gb.fixedUplinkGsId = null;
+      gb.fixedDownlinkGsId = null;
+
       uplinkGsId = $("tasking-gb-gs-uplink-manual")?.value || null;
       downlinkGsId = $("tasking-gb-gs-downlink-manual")?.value || null;
 
@@ -1051,16 +1268,30 @@ function setMisHighlight(misId) {
       if (gUp && uplinkGsId) uplinkRoute = dijkstra(gUp.adj, uplinkGsId, misId, "fast", uplinkCmdMbits, gUp.cfg);
       if (gDown && downlinkGsId) downlinkRoute = dijkstra(gDown.adj, misId, downlinkGsId, "fast", downDataMbits, gDown.cfg);
     } else {
-      const bestUp = computeBestUplinkAuto(time, misId);
-      uplinkGsId = bestUp?.gsId || null;
-      uplinkRoute = bestUp?.route || null;
+      // AUTO: фиксируем выбранные станции, чтобы не "прыгали"
+      if (!gb.fixedUplinkGsId) {
+        const bestUp = computeBestUplinkAuto(time, misId, gb.targetRect);
+        gb.fixedUplinkGsId = bestUp?.gsId || null;
+      }
+      uplinkGsId = gb.fixedUplinkGsId;
+
+      const upGs = uplinkGsId ? getEntityById(uplinkGsId) : null;
+      const gUp = upGs ? buildGraphSnapshot(time, upGs, true, misId) : null;
+      if (gUp && uplinkGsId) uplinkRoute = dijkstra(gUp.adj, uplinkGsId, misId, "fast", uplinkCmdMbits, gUp.cfg);
 
       const upSel = $("tasking-gb-gs-uplink");
       if (upSel && uplinkGsId) upSel.value = uplinkGsId;
 
-      const bestDown = computeBestDownlinkAuto(time, misId, same, uplinkGsId);
-      downlinkGsId = bestDown?.gsId || null;
-      downlinkRoute = bestDown?.route || null;
+      if (same && uplinkGsId) gb.fixedDownlinkGsId = uplinkGsId;
+      if (!gb.fixedDownlinkGsId) {
+        const bestDown = computeBestDownlinkAuto(time, misId, same, uplinkGsId);
+        gb.fixedDownlinkGsId = bestDown?.gsId || null;
+      }
+      downlinkGsId = gb.fixedDownlinkGsId;
+
+      const downGs = downlinkGsId ? getEntityById(downlinkGsId) : null;
+      const gDown = downGs ? buildGraphSnapshot(time, downGs, true, misId) : null;
+      if (gDown && downlinkGsId) downlinkRoute = dijkstra(gDown.adj, misId, downlinkGsId, "fast", downDataMbits, gDown.cfg);
     }
 
     gb.lastUplinkGsId = uplinkGsId;
@@ -1175,6 +1406,8 @@ function setMisHighlight(misId) {
       gb.taskTimer = null;
     }
     gb.task = null;
+    gb.fixedUplinkGsId = null;
+    gb.fixedDownlinkGsId = null;
     if (finalText) {
       setMissionStatus(finalText);
       setUplinkXfer("—");
@@ -1213,6 +1446,12 @@ function setMisHighlight(misId) {
     gb.lastDownlinkRoute = null;
     gb.lastBottleneckUplinkMbps = null;
     gb.lastBottleneckDownlinkMbps = null;
+    gb.fixedUplinkGsId = null;
+    gb.fixedDownlinkGsId = null;
+    gb.fixedUplinkGsId = null;
+    gb.fixedDownlinkGsId = null;
+    gb.fixedUplinkGsId = null;
+    gb.fixedDownlinkGsId = null;
     gb.lastStationText = "—";
     setStationsLine("—");
     setUplinkStation("—");
@@ -1365,13 +1604,14 @@ function setMisHighlight(misId) {
     const t0 = nowJulian(getClock());
     const etaSec = Number.isFinite(gb.chosenEtaSec) ? gb.chosenEtaSec : 0;
     const targetTime = Cesium.JulianDate.addSeconds(t0, Math.max(0, etaSec), new Cesium.JulianDate());
+    const imagingSec = getImagingDurationSeconds(rect);
 
     gb.task = {
       stage: "UPLINK_WAIT_ROUTE",
       uplinkRemainingMbits: 1.0,
       targetTime,
-      imagingDurationSec: 30,
-      imagingRemainingSec: 30,
+      imagingDurationSec: imagingSec,
+      imagingRemainingSec: imagingSec,
       downlinkRemainingMbits: getResultDataMbits(),
     };
 
@@ -1396,10 +1636,10 @@ function setMisHighlight(misId) {
 
     if (visible) {
       panel.classList.remove("hidden");
-      toggle.textContent = "▲ Задание ГБ";
+      toggle.textContent = "▲ Миссия";
     } else {
       panel.classList.add("hidden");
-      toggle.textContent = "▼ Задание ГБ";
+      toggle.textContent = "▼ Миссия";
     }
   }
 
@@ -1465,6 +1705,7 @@ function setMisHighlight(misId) {
     const toggle = $("tasking-gb-toggle");
 
     ensureImagingRadiusUi();
+    ensureImagingDurationUi();
     // ensureOrbitLineUi();
 
     if (toggle) {
@@ -1581,6 +1822,21 @@ function setMisHighlight(misId) {
     $("tasking-gb-radius-km")?.addEventListener("input", () => {
       if (gb.targetRect) drawOrUpdateBufferRect();
       if (gb.chosenMisId) buildAndRenderRoutesSnapshot();
+    });
+
+    $("tasking-gb-duration-manual")?.addEventListener("change", () => {
+      const hint = $("tasking-gb-duration-hint");
+      if (hint) {
+        const sec = getImagingDurationSeconds(gb.targetRect);
+        hint.textContent = `Оценка времени съёмки: ~${sec.toFixed(0)} c`;
+      }
+    });
+    $("tasking-gb-duration-sec")?.addEventListener("input", () => {
+      const hint = $("tasking-gb-duration-hint");
+      if (hint) {
+        const sec = getImagingDurationSeconds(gb.targetRect);
+        hint.textContent = `Оценка времени съёмки: ~${sec.toFixed(0)} c`;
+      }
     });
 
     window.addEventListener("spaceMesh:radioTick", () => {

@@ -459,7 +459,8 @@
       polyline: {
         positions: positionsCallback,
         width: 1.6,
-        material
+        material,
+        arcType: Cesium.ArcType.NONE // рисуем прямую хорду, без геодезической дуги
       }
     });
   }

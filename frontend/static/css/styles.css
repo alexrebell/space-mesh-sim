@@ -532,6 +532,158 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
   outline-offset: 2px;
 }
 
+.gb-duration-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gb-duration-input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#tasking-gb-duration-sec:disabled {
+  opacity: 0.6;
+}
+
+/* Блок управления временем съёмки */
+.gb-duration-block {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+/* Исправление для панели Задание ГБ: вертикальные ряды */
+#tasking-gb-panel .row {
+  display: grid !important;            /* принудительно столбиком */
+  grid-template-columns: 1fr !important;
+  width: 100% !important;
+  gap: 8px !important;
+}
+
+#tasking-gb-panel .row > * {
+  width: 100% !important;
+}
+
+#tasking-gb-panel .row label {
+  display: block !important;
+  width: 100% !important;
+  margin: 0 0 8px 0 !important;
+}
+
+#tasking-gb-panel .row label:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Убедимся, что инпуты занимают всю ширину */
+#tasking-gb-panel input[type="number"] {
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Для блоков с чекбоксами — оставить горизонтальное расположение текста и чекбокса */
+#tasking-gb-panel .row label:has(input[type="checkbox"]) {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-bottom: 8px !important;
+}
+
+#tasking-gb-panel .row label:has(input[type="checkbox"]) input[type="checkbox"] {
+  margin-left: 8px !important;
+  flex: 0 0 auto !important;
+}
+
+/* ===== КРИТИЧЕСКОЕ ДОПОЛНЕНИЕ: усиливаем вертикальное расположение ===== */
+#tasking-gb-panel .row {
+  margin: 0 !important;
+  padding: 0 !important;
+  flex-direction: column !important;   /* на случай, если grid не сработает */
+  grid-template-columns: 1fr !important;
+  gap: 12px !important;
+}
+
+#tasking-gb-panel .row > * {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+#tasking-gb-panel .row label {
+  padding: 0 !important;
+  margin: 0 0 12px 0 !important;
+}
+#tasking-gb-panel .row label:last-child {
+  margin-bottom: 0 !important;
+}
+
+#tasking-gb-panel input[type="number"],
+#tasking-gb-panel input[type="text"],
+#tasking-gb-panel select {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  display: block !important;
+}
+
+#tasking-gb-panel .row label:has(input[type="checkbox"]) {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  margin-bottom: 8px !important;
+}
+#tasking-gb-panel .row label:has(input[type="checkbox"]) input[type="checkbox"] {
+  width: auto !important;
+  margin-left: 8px !important;
+  flex: 0 0 auto !important;
+}
+
+/* Усиливаем правила именно для панели Задание ГБ */
+#tasking-gb-panel label {
+  display: block !important;
+  flex-direction: column !important;
+  width: 100% !important;
+}
+
+/* Чекбоксы: текст прижат к галке, без space-between */
+#tasking-gb-panel label:has(input[type="checkbox"]) {
+  justify-content: flex-start !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+#tasking-gb-panel label:has(input[type="checkbox"]) input[type="checkbox"] {
+  margin-left: 0 !important;
+}
+
+/* Явный вертикальный стек для рядов с классом gb-row-vert (отладка позиции) */
+#tasking-gb-panel .gb-row-vert {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  width: 100% !important;
+  gap: 0 !important;  /* без зазора между полями lon/lat */
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+#tasking-gb-panel .gb-row-vert > * {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+#tasking-gb-panel .gb-row-vert label {
+  margin: 0 !important;
+}
+
+#tasking-gb-panel .size-hint {
+  margin-top: 4px !important;
+  color: #eaeaea !important;
+}
 @media (max-width: 900px) {
   #spaceMeshScenarioButton {
     right: 10px;
@@ -615,3 +767,4 @@ label:has(input[type="checkbox"]) input[type="checkbox"] {
 #tasking-gb-panel .gb-warn { color: #f4d03f; }  /* Р¶С‘Р»С‚С‹Р№ */
 #tasking-gb-panel .gb-bad  { color: #ff6b6b; }  /* РєСЂР°СЃРЅС‹Р№ РјСЏРіРєРёР№ */
 #tasking-gb-panel .gb-dim  { color: #aab7b8; }  /* СЃРµСЂС‹Р№ */
+

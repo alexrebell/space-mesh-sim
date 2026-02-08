@@ -1,3 +1,18 @@
+// --- 0. Домашний ракурс (чтобы Home и старт совпадали) ---
+const HOME_LON = 70.0;
+const HOME_LAT = 40.0;
+const HOME_HEIGHT = 20000000.0; // 20 000 км
+const HOME_RECT = Cesium.Rectangle.fromDegrees(
+  HOME_LON - 40,  // west
+  HOME_LAT - 25,  // south
+  HOME_LON + 40,  // east
+  HOME_LAT + 25   // north
+);
+
+// Переопределяем дефолтный прямоугольник камеры до создания Viewer
+Cesium.Camera.DEFAULT_VIEW_RECTANGLE = HOME_RECT;
+Cesium.Camera.DEFAULT_VIEW_FACTOR = 0.8;
+
 // --- 1. Инициализация Viewer --- БЕЗ ИНТЕРНЕТА
 
 const viewer = new Cesium.Viewer("cesiumContainer", {
@@ -15,26 +30,33 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
 });
 
 // --- Переопределяем кнопку Home (View Home) -> фокус на Россию ---
+function goHomeView(durationSec = 1.2) {
+  const opts = {
+    destination: Cesium.Cartesian3.fromDegrees(HOME_LON, HOME_LAT, HOME_HEIGHT),
+    orientation: {
+      heading: Cesium.Math.toRadians(0.0),
+      pitch: Cesium.Math.toRadians(-90.0),
+      roll: 0.0
+    }
+  };
+
+  if (durationSec && durationSec > 0) {
+    viewer.camera.flyTo({ ...opts, duration: durationSec });
+  } else {
+    viewer.camera.setView(opts);
+  }
+}
+
+// Переопределяем кнопку Home (View Home) -> фокус на Россию
 if (viewer.homeButton && viewer.homeButton.viewModel && viewer.homeButton.viewModel.command) {
   viewer.homeButton.viewModel.command.beforeExecute.addEventListener(function (e) {
-    // отменяем стандартный "дом" Cesium (обычно смотрит на США/0 меридиан в зависимости от сцены)
-    e.cancel = true;
-
-    const lon = 70.0; // Долгота
-    const lat = 40.0; // Широта
-    const height = 20000000.0; // 20 000 км
-
-    viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(lon, lat, height),
-      orientation: {
-        heading: Cesium.Math.toRadians(0.0),
-        pitch: Cesium.Math.toRadians(-90.0),
-        roll: 0.0
-      },
-      duration: 1.2
-    });
+    e.cancel = true; // отменяем стандартный "дом"
+    goHomeView(1.2);
   });
 }
+
+// Сразу ставим камеру в домашний ракурс при загрузке (без анимации)
+goHomeView(0);
 
 
 // --- 1a. Явно добавляем офлайн-подложку как первый слой ---
@@ -976,7 +998,12 @@ if (linkResetBtn) {
 
 // --- 6. Стартовый вид камеры ---
 viewer.scene.camera.setView({
-  destination: Cesium.Cartesian3.fromDegrees(0, 20, 20000000.0)
+  destination: Cesium.Cartesian3.fromDegrees(HOME_LON, HOME_LAT, HOME_HEIGHT),
+  orientation: {
+    heading: Cesium.Math.toRadians(0.0),
+    pitch: Cesium.Math.toRadians(-90.0),
+    roll: 0.0
+  }
 });
 
 // --- 7. Экспорт базовых объектов в глобальный namespace для других модулей ---

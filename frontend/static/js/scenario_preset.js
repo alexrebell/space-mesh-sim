@@ -55,7 +55,7 @@
     setValue("mission-orbit-name", "MIS-LEO-450");
     setValue("mission-altitude", 450);
     setValue("mission-inclination", 61);
-    setValue("mission-num-sats", 20);
+    setValue("mission-num-sats", 30);
     submitForm("mission-form");
 
     // 3) Радиосеть КА
