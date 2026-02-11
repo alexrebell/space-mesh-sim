@@ -1545,7 +1545,7 @@ function setMisHighlight(misId) {
         setMissionStatus("Съёмка области…");
       setUplinkXfer("задание доставлено");
       setDownlinkXfer("—");
-      setStatusLine(`Съёмка области… осталось ${gb.task.imagingRemainingSec} c`);
+      setStatusLine(`Съёмка области… осталось ${Math.ceil(gb.task.imagingRemainingSec)} c`);
       }
       return;
     }

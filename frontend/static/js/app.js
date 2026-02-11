@@ -321,7 +321,7 @@ function createOrbitPolyline(orbit, color) {
 // --- Создание спутника на орбите ---
 // ВАЖНО: здесь учитывается вращение Земли (OMEGA_E),
 // чтобы ground track был с межвитковым сдвигом.
-function createSatelliteOnOrbit(orbit, color, satIndex, totalSatellites) {
+function createSatelliteOnOrbit(orbit, color, satIndex, totalSatellites, orbitGroupId) {
   const r = EARTH_RADIUS + orbit.altitude;
 
   // Выбор фазового шага между спутниками
@@ -403,6 +403,7 @@ function createSatelliteOnOrbit(orbit, color, satIndex, totalSatellites) {
     properties: {
       isSatellite: true,
       orbitName: orbit.name,
+      orbitId: orbitGroupId ?? null,
       satelliteIndex: satIndexHuman,
       altitudeKm: altitudeKm,
       inclinationDeg: inclinationDeg,
@@ -443,18 +444,19 @@ function cesiumColorToCss(color) {
 // --- Добавление орбиты с КА ---
 function addOrbitWithSatellites(orbitOptions, color) {
   const orbit = createOrbit(orbitOptions);
+  const groupId = orbitIdCounter++;
 
   const polylineEntity = createOrbitPolyline(orbit, color);
 
   const total = orbit.numSatellites;
   const satellites = [];
   for (let i = 0; i < total; i++) {
-    const satEntity = createSatelliteOnOrbit(orbit, color, i, total);
+    const satEntity = createSatelliteOnOrbit(orbit, color, i, total, groupId);
     satellites.push(satEntity);
   }
 
   const group = {
-    id: orbitIdCounter++,
+    id: groupId,
     name: orbit.name,
     color, // Cesium.Color
     cssColor: cesiumColorToCss(color),
@@ -551,7 +553,7 @@ function rebuildSatellitesOnOrbit(group, newTotal) {
 
   const satellites = [];
   for (let i = 0; i < total; i++) {
-    satellites.push(createSatelliteOnOrbit(orbit, color, i, total));
+    satellites.push(createSatelliteOnOrbit(orbit, color, i, total, group.id));
   }
 
   group.satellites = satellites;

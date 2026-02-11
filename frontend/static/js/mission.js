@@ -284,7 +284,7 @@ function getMissionColorByIndex(index) {
   }
 
   // --- MIS-КА на орбите (квадрат, как было) ---
-  function createMissionSatelliteOnOrbit(orbit, color, satIndex, totalSatellites, participatesInMeshFlag) {
+  function createMissionSatelliteOnOrbit(orbit, color, satIndex, totalSatellites, participatesInMeshFlag, orbitGroupId) {
     let deltaThetaRad;
     if (orbit.evenSpacing || !orbit.phaseStepRad || orbit.phaseStepRad <= 0) {
       deltaThetaRad = totalSatellites > 0 ? (2 * Math.PI) / totalSatellites : 0;
@@ -360,6 +360,7 @@ function getMissionColorByIndex(index) {
       properties: {
         isSatellite: true,
         isMissionSatellite: true,
+        orbitId: orbitGroupId ?? null,
 
         // unified radio mesh читает эти свойства
         participatesInMesh: new Cesium.ConstantProperty(!!participatesInMeshFlag),
@@ -395,6 +396,7 @@ function getMissionColorByIndex(index) {
   function addMissionOrbitWithSatellites(opts) {
     const color = getMissionColorByIndex(missionStore.length);
     const cssColor = cesiumColorToCss(color);
+    const groupId = missionIdCounter++;
 
     const orbit = createOrbit({
       name: opts.name,
@@ -410,12 +412,12 @@ function getMissionColorByIndex(index) {
     const satellites = [];
     for (let i = 0; i < orbit.numSatellites; i++) {
       satellites.push(
-        createMissionSatelliteOnOrbit(orbit, color, i, orbit.numSatellites, opts.participatesInMesh)
+        createMissionSatelliteOnOrbit(orbit, color, i, orbit.numSatellites, opts.participatesInMesh, groupId)
       );
     }
 
     const group = {
-      id: missionIdCounter++,
+      id: groupId,
       name: orbit.name,
       color,
       cssColor,
@@ -473,7 +475,7 @@ function getMissionColorByIndex(index) {
 
     const satellites = [];
     for (let i = 0; i < total; i++) {
-      satellites.push(createMissionSatelliteOnOrbit(orbit, color, i, total, participates));
+      satellites.push(createMissionSatelliteOnOrbit(orbit, color, i, total, participates, group.id));
     }
 
     group.satellites = satellites;

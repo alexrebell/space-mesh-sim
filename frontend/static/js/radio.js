@@ -93,7 +93,8 @@
       noiseBandwidthMHz: 20,
 
       // 1.5. Mesh-специфика
-      maxNeighborsPerSat: 0, // 0 = без ограничения
+    maxNeighborsPerSat: 0, // 0 = без ограничения
+    limitOrbitHop: false,
       routingMetric: "snr",
 
       // 1.6. Энергетика КА
@@ -228,6 +229,18 @@
     }
 
     return { sats, satKindById };
+  }
+
+  function getOrbitId(ent, time) {
+    try {
+      const v =
+        ent?.properties?.orbitId?.getValue?.(time) ??
+        ent?.properties?.orbitId;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
   }
 
   function computeAverageOrbitPeriodSec() {
@@ -485,6 +498,7 @@
   const radioMeshInfoEl          = document.getElementById("radio-mesh-info");
   const radioLinkSummaryEl       = document.getElementById("radio-link-summary");
   const radioEnergySummaryEl     = document.getElementById("radio-energy-summary");
+  const radioLimitOrbitHopCheckbox = document.getElementById("radio-limit-orbit-hop");
 
   if (radioLimitMinDistanceCheckbox) {
     radioState.config.minLinkDistanceEnabled = !!radioLimitMinDistanceCheckbox.checked;
@@ -504,8 +518,8 @@
   const antennaCustomBlock  = document.getElementById("antenna-custom-block");
 
   const PHASED_PROFILE_TIPS = {
-    A: "Баланс: до ~1500 км, скорость ~60 Мбит/с. Основной режим для межорбитных 900–1500 км.",
-    B: "Скорость: до ~1100 км, скорость ~120 Мбит/с. Использовать с ближними соседями.",
+    A: "Баланс (лабораторный): до ~2000 км, скорость ~100 Мбит/с. Потребует уточнения под реальное изделие.",
+    B: "Скорость (лабораторный): до ~1600 км, скорость ~180 Мбит/с. Потребует уточнения под реальное изделие.",
     C: "Надёжность: до ~1800 км, скорость ~35 Мбит/с. Резерв/устойчивость при разрежении."
   };
 
@@ -604,6 +618,14 @@
     applyMinDist();
   }
 
+  if (radioLimitOrbitHopCheckbox) {
+    radioState.config.limitOrbitHop = !!radioLimitOrbitHopCheckbox.checked;
+    radioLimitOrbitHopCheckbox.addEventListener("change", function () {
+      radioState.config.limitOrbitHop = !!radioLimitOrbitHopCheckbox.checked;
+      radioState.lastUpdateSeconds = 0;
+    });
+  }
+
   if (antennaTypeSelect) {
     antennaTypeSelect.addEventListener("change", function () {
       const cfg = radioState.config;
@@ -622,18 +644,18 @@
 
   const PHASED_PROFILES = {
     A: {
-      // Баланс: дальность ~1400–1600 км, скорость умеренная
-      name: "A — Баланс (до ~1500 км)",
+      // Баланс (лабораторный): дальность ~2000 км, скорость ~100 Мбит/с
+      name: "A — Баланс (лабораторный, до ~2000 км)",
       freqMHz: 25000,
-      txPowerDbm: 32,
+      txPowerDbm: 33,
       rxSensDbm: -96,
       minSnrDb: 6,
-      maxRangeKm: 1650,
+      maxRangeKm: 2000,
       noiseFloorDbm: -110,
 
       antennaType: "phased",
-      gainTxDb: 33,
-      gainRxDb: 33,
+      gainTxDb: 34,
+      gainRxDb: 34,
       beamWidthDeg: 4,
       pointingLossDb: 1.0,
       polLossDb: 0.3,
@@ -646,33 +668,33 @@
 
       modulation: "QPSK",
       codingRate: 0.5,
-      dataRateMbps: 60,
-      bandwidthMHz: 15,
+      dataRateMbps: 100,
+      bandwidthMHz: 20,
 
       sysTempK: 650,
-      noiseBandwidthMHz: 15,
+      noiseBandwidthMHz: 20,
 
       maxNeighborsPerSat: 4,
       routingMetric: "snr_distance",
 
-      txElecPowerW: 75,
+      txElecPowerW: 90,
       dutyCycle: 0.2,
-      refDistanceKm: 1400
+      refDistanceKm: 1700
     },
 
     B: {
-      // Скорость: ближние соседи ~800–1200 км, высокая пропускная
-      name: "B — Скорость (до ~1100 км)",
+      // Скорость (лабораторный): ближние/средние соседи ~1500–1600 км, высокая пропускная
+      name: "B — Скорость (лабораторный, до ~1600 км)",
       freqMHz: 25000,
-      txPowerDbm: 34,
-      rxSensDbm: -93,
+      txPowerDbm: 35,
+      rxSensDbm: -92,
       minSnrDb: 7,
-      maxRangeKm: 1100,
+      maxRangeKm: 1600,
       noiseFloorDbm: -110,
 
       antennaType: "phased",
-      gainTxDb: 34,
-      gainRxDb: 34,
+      gainTxDb: 35,
+      gainRxDb: 35,
       beamWidthDeg: 4,
       pointingLossDb: 1.0,
       polLossDb: 0.3,
@@ -685,7 +707,7 @@
 
       modulation: "QPSK",
       codingRate: 0.5,
-      dataRateMbps: 120,
+      dataRateMbps: 180,
       bandwidthMHz: 25,
 
       sysTempK: 650,
@@ -694,9 +716,9 @@
       maxNeighborsPerSat: 4,
       routingMetric: "snr_distance",
 
-      txElecPowerW: 95,
+      txElecPowerW: 120,
       dutyCycle: 0.2,
-      refDistanceKm: 950
+      refDistanceKm: 1500
     },
 
     C: {
@@ -1046,7 +1068,9 @@
 
     const snrLin = Math.pow(10, snrDb / 10);
     const C_bps = B_Hz * Math.log2(1 + snrLin);
-    return C_bps / 1e6;
+    const capShannonMbps = C_bps / 1e6;
+    const capMcsMbps = cfg.dataRateMbps;
+    return Math.min(capShannonMbps, capMcsMbps);
   }
 
   function updateSingleLinkAndEnergySummary() {
@@ -1148,7 +1172,8 @@
              <b class="radio-label">запас:</b> <b>${isFinite(ebnoMarginDb) ? ebnoMarginDb.toFixed(1) : "-"} dB</b>
            </div>
            <div><b class="radio-label">Целевая скорость (MCS):</b> <b>${cfg.dataRateMbps} Мбит/с</b> при <b>${cfg.bandwidthMHz} МГц</b></div>
-           <div><b class="radio-label">Макс. теор. ёмкость (Шеннон):</b> <b>${isFinite(capRefMbps) ? capRefMbps.toFixed(1) : "-"} Мбит/с</b></div>
+           <div><b class="radio-label">Оценка Шеннона:</b> <b>${isFinite(capRefMbps) ? capRefMbps.toFixed(1) : "-"} Мбит/с</b> (ограничено SNR и полосой)</div>
+           <div><b class="radio-label">Доступная скорость (мин из MCS/Шеннона):</b> <b>${isFinite(capRefMbps) ? Math.min(capRefMbps, cfg.dataRateMbps).toFixed(1) : "-"} Мбит/с</b></div>
            <div><b class="radio-label">Дальность R<sub>max</sub> (по Rx / по SNR / итог):</b>
              <b>${isFinite(rMaxRxKm) ? rMaxRxKm.toFixed(0) : "-"} / ${isFinite(rMaxSnrKm) ? rMaxSnrKm.toFixed(0) : "-"} / ${isFinite(rMaxKm) ? rMaxKm.toFixed(0) : "-"} км</b>
            </div>
@@ -1242,14 +1267,21 @@
       const satA = sats[i];
       const posA = satA.position.getValue(time);
       if (!posA) continue;
+      const orbitIdA = cfg.limitOrbitHop ? getOrbitId(satA, time) : null;
 
       for (let j = i + 1; j < n; j++) {
         const satB = sats[j];
         const posB = satB.position.getValue(time);
         if (!posB) continue;
+        const orbitIdB = cfg.limitOrbitHop ? getOrbitId(satB, time) : null;
 
         const aIsMis = isMissionSat(satA, time);
         const bIsMis = isMissionSat(satB, time);
+
+        // Ограничение "только соседние орбиты" применяем только к mesh↔mesh, а MIS ↔ любой не фильтруем
+        if (cfg.limitOrbitHop && !aIsMis && !bIsMis && orbitIdA !== null && orbitIdB !== null) {
+          if (Math.abs(orbitIdA - orbitIdB) > 1) continue;
+        }
 
         // Если запрещены MIS↔MIS (можно переключать конфигом)
         if (!cfg.allowMisToMis && aIsMis && bIsMis) continue;

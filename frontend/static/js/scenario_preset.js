@@ -44,10 +44,10 @@
   function applyScenario() {
     // 1) Орбиты и КА (массовое создание)
     setValue("bulk-altitude", 900);
-    setValue("bulk-num-sats", 35);
+    setValue("bulk-num-sats", 30);
     setChecked("bulk-even-spacing", true);
     setValue("bulk-phase-step", 0);
-    setValue("bulk-num-orbits", 30);
+    setValue("bulk-num-orbits", 20);
     setChecked("bulk-skip-polar", true);
     submitForm("bulk-orbits-form");
 

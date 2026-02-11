@@ -113,17 +113,6 @@
   </div>
 </div>
 
-    <!-- Список миссионных орбит (MIS) -->
-    <div id="mission-list-container" style="margin-top:10px;">
-        <h2 style="margin:8px 0;">Текущие орбиты</h2>
-        <ul id="mission-list"></ul>
-
-        <button id="mission-delete-all" type="button" style="background:#d9534f; margin-top:6px;">
-            🗑 Удалить все MIS-орбиты и КА
-        </button>
-    </div>
-</div>
-
 
 <!-- Левая панель: Задания на съёмку -->
 <div id="tasking-panel" class="overlay-panel hidden">
@@ -733,6 +722,11 @@
               <option value="distance">Минимальная дистанция</option>
               <option value="snr_distance">SNR / дистанция</option>
             </select>
+          </label>
+
+          <label title="Запретить 'прыжки' через орбиту: линк только с соседними орбитами (по ID создания).">
+            Только соседние орбиты (без прыжков):
+            <input id="radio-limit-orbit-hop" type="checkbox" />
           </label>
         </details>
 
